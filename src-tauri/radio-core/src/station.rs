@@ -54,6 +54,9 @@ pub struct Station {
     pub country_code: Country,
     /// The province or region.
     pub state: Option<String>,
+    /// Where the station is, in degrees, when radio-browser knows.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub languages: Vec<String>,
     pub codec: Option<String>,
     /// In kbit/s.
@@ -90,6 +93,8 @@ pub(crate) fn station(id: &str, click_count: u32) -> Station {
         tags: vec!["news".to_owned()],
         country_code: Country::Taiwan,
         state: None,
+        latitude: None,
+        longitude: None,
         languages: vec!["chinese".to_owned()],
         codec: Some("MP3".to_owned()),
         bitrate: Some(128),
@@ -127,6 +132,8 @@ mod tests {
                 "tags": ["news"],
                 "countryCode": "TW",
                 "state": null,
+                "latitude": null,
+                "longitude": null,
                 "languages": ["chinese"],
                 "codec": "MP3",
                 "bitrate": 128,

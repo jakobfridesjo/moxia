@@ -162,7 +162,7 @@ export const en = {
     languageDescription: "The language of menus, buttons and messages.",
     theme: "Day and night",
     themeDescription:
-      "At night the paper turns dark and each painting is lit its own way: a tea stove, a boat lamp, a stick of incense, the moon. Auto follows your device.",
+      "At night the paper turns dark and each painting is lit its own way: a tea stove, a boat lamp, a stick of incense, the moon. Auto follows the sun where the station is, and your device elsewhere.",
     themeOptions: { auto: "Auto", day: "Day", night: "Night" },
     keySounds: "Key sounds",
     keySoundsDescription:
@@ -170,7 +170,7 @@ export const en = {
     switchOptions: { on: "On", off: "Off" },
     environment: "Weather",
     environmentDescription:
-      "Mist drifting over the paintings, rain on the river, falling leaves and the light of day. Turn it off for a still painting that spares the battery.",
+      "Mist drifting over the paintings, rain on the river, falling leaves and the light of day. It follows the real weather where the station is, fetched from Open-Meteo. Turn it off for a still painting that spares the battery and asks nothing of the network.",
     shaders: "Shaders",
     shadersDescription:
       "Mist, rain, light and the change of place are drawn on the graphics card. Turn them off if the paintings flicker or drain the battery; the paintings then hold still, with no weather, and their night lights stay but never flicker.",
@@ -224,6 +224,7 @@ export const en = {
     packages: (count: number) => `${formatInteger(count)} ${count === 1 ? "package" : "packages"}`,
     credits: {
       stations: "Station directory",
+      weather: "Weather data",
       decoding: "Audio decoding",
       playback: "Audio playback",
       transcription: "Speech recognition",

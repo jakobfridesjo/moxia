@@ -23,6 +23,8 @@ pub enum Error {
     Download(String),
     #[error("Could not translate: {0}")]
     Translation(String),
+    #[error("Could not get the weather: {0}")]
+    Weather(String),
     #[error("Could not reach the others: {0}")]
     Together(String),
 }

@@ -11,18 +11,19 @@
 
 ### `radio-core`
 
-| Module           | Does                                                                                 |
-| ---------------- | ------------------------------------------------------------------------------------ |
-| `radio_browser`  | Talks to radio-browser, trying its mirrors in turn; counts each play                 |
-| `catalog`        | Every CN, TW, HK and MO station, cached in memory and on disk for a day              |
-| `store`          | SQLite: favourites, their preset keys and the 30 last played                         |
-| `favicon`        | Fetches station logos and hands them over as `data:` URLs, cached on disk            |
-| `player`         | Fetches, decodes (symphonia) and plays (rodio) one station or tape at a time         |
-| `tapes`          | Recordings: the stream's own MP3 or AAC frames, with a JSON description              |
-| `models`, `onnx` | Model downloads, and the tract runtime that runs them (on the GPU when there is one) |
-| `speech`         | Live subtitles: finds speech and transcribes it                                      |
-| `together`       | Listening together: rooms of peers who follow each other's station and chat, on iroh |
-| `translation`    | Translates chat messages from Chinese into English (opus-mt)                         |
+| Module           | Does                                                                                                  |
+| ---------------- | ----------------------------------------------------------------------------------------------------- |
+| `radio_browser`  | Talks to radio-browser, trying its mirrors in turn; counts each play                                  |
+| `catalog`        | Every CN, TW, HK and MO station, cached in memory and on disk for a day                               |
+| `store`          | SQLite: favourites, their preset keys and the 30 last played                                          |
+| `favicon`        | Fetches station logos and hands them over as `data:` URLs, cached on disk                             |
+| `player`         | Fetches, decodes (symphonia) and plays (rodio) one station or tape at a time                          |
+| `tapes`          | Recordings: the stream's own MP3 or AAC frames, with a JSON description                               |
+| `models`, `onnx` | Model downloads, and the tract runtime that runs them (on the GPU when there is one)                  |
+| `speech`         | Live subtitles: finds speech and transcribes it                                                       |
+| `sky`            | The weather where a station is, from Open-Meteo, as how much rain, snow, cloud, fog and wind to paint |
+| `together`       | Listening together: rooms of peers who follow each other's station and chat, on iroh                  |
+| `translation`    | Translates chat messages from Chinese into English (opus-mt)                                          |
 
 ## The command contract
 

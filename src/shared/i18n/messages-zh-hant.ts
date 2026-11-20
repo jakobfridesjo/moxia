@@ -140,7 +140,7 @@ export const zhHant: Messages = {
     languageDescription: "選單、按鈕和提示所用的語言。",
     theme: "晝夜",
     themeDescription:
-      "入夜後紙色轉暗，每幅畫各有其光：茶爐、漁火、一炷香、月色。自動則隨裝置而定。",
+      "入夜後紙色轉暗，每幅畫各有其光：茶爐、漁火、一炷香、月色。自動則隨電臺所在地的日出日落，其他頁面隨裝置而定。",
     themeOptions: { auto: "自動", day: "晝", night: "夜" },
     keySounds: "按鍵聲音",
     keySoundsDescription:
@@ -148,7 +148,7 @@ export const zhHant: Messages = {
     switchOptions: { on: "開", off: "關" },
     environment: "天氣",
     environmentDescription:
-      "畫上飄過的霧、河上的雨、飄落的葉子和白晝的光。關掉後畫面靜止，更省電。",
+      "畫上飄過的霧、河上的雨、飄落的葉子和白晝的光。天氣隨電臺所在地的實際天氣而變，取自 Open-Meteo。關掉後畫面靜止，更省電，也不連網查詢天氣。",
     shaders: "著色器",
     shadersDescription:
       "霧、雨、光和換地方的暈染由顯示卡繪製。畫面閃爍或耗電時可以關掉；之後畫面靜止，沒有天氣，夜裡的燈光仍在，但不再閃動。",
@@ -199,6 +199,7 @@ export const zhHant: Messages = {
     packages: (count: number) => `${formatInteger(count)} 個套件`,
     credits: {
       stations: "電臺目錄",
+      weather: "天氣資料",
       decoding: "音訊解碼",
       playback: "音訊播放",
       transcription: "語音辨識",

@@ -162,7 +162,7 @@ export const sv: Messages = {
     languageDescription: "Språket i menyer, knappar och meddelanden.",
     theme: "Dag och natt",
     themeDescription:
-      "På natten mörknar papperet och varje målning lyses upp på sitt eget sätt: en tekamin, en båtlykta, en rökelsesticka, månen. Auto följer din enhet.",
+      "På natten mörknar papperet och varje målning lyses upp på sitt eget sätt: en tekamin, en båtlykta, en rökelsesticka, månen. Auto följer solen där stationen finns, och annars din enhet.",
     themeOptions: { auto: "Auto", day: "Dag", night: "Natt" },
     keySounds: "Knappljud",
     keySoundsDescription:
@@ -170,7 +170,7 @@ export const sv: Messages = {
     switchOptions: { on: "På", off: "Av" },
     environment: "Väder",
     environmentDescription:
-      "Dimma som driver över målningarna, regn över floden, fallande löv och dagens ljus. Stäng av för en stilla målning som sparar batteri.",
+      "Dimma som driver över målningarna, regn över floden, fallande löv och dagens ljus. Det följer det verkliga vädret där stationen finns, hämtat från Open-Meteo. Stäng av för en stilla målning som sparar batteri och inte frågar nätet.",
     shaders: "Shaders",
     shadersDescription:
       "Dimma, regn, ljus och bytet av plats ritas på grafikkortet. Stäng av om målningarna flimrar eller drar batteri; målningarna står då stilla, utan väder, och nattens ljus finns kvar men flimrar inte.",
@@ -223,6 +223,7 @@ export const sv: Messages = {
     packages: (count: number) => `${formatInteger(count)} paket`,
     credits: {
       stations: "Stationskatalog",
+      weather: "Väderdata",
       decoding: "Ljudavkodning",
       playback: "Ljuduppspelning",
       transcription: "Taligenkänning",

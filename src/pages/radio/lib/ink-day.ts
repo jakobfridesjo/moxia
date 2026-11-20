@@ -2,6 +2,7 @@ import type { CountryCode } from "@/shared/api/commands.ts";
 import type { Air } from "@/pages/radio/lib/air.ts";
 import type { Scene } from "@/pages/radio/lib/ink-painter.ts";
 import type { InkGL } from "@/pages/radio/lib/ink-gl.ts";
+import type { SkyNow } from "@/pages/radio/lib/ink-sky.ts";
 
 /*
  * The radio's paintings by day, where the night has its lights: soft rain on Taiwan's river, sun
@@ -25,7 +26,7 @@ const PAINTED_SMOKE: Erased = { box: [-20, 340, 388, 800], feather: 16 };
 /** Effect time a reduced-motion frame holds at. */
 const STILL_TIME = 23.7;
 
-const COMMON = `#version 300 es
+export const COMMON = `#version 300 es
 precision highp float;
 uniform sampler2D u_ink;
 /** \`hash12\` at each whole point of a repeating 256 square, as \`dayLattice\` works it out. */
@@ -36,6 +37,10 @@ uniform float u_time;
 uniform float u_ratio;
 uniform float u_moving;
 uniform float u_over;
+/** The weather where the station is, each 0 to 1: rain, snow, cloud and fog. */
+uniform vec4 u_weather;
+/** Wind 0 to 1, lightning 0 or 1, the warmth of dawn or dusk 0 to 1, and 1 at night. */
+uniform vec4 u_air;
 in vec2 v_px;
 out vec4 color;
 const vec3 MIST = vec3(.957, .941, .91);
@@ -51,6 +56,8 @@ float segDist2(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; vec2 off =
 float gauss(float x) { return exp(-x * x); }
 /** Colour \`c\` laid over what \`acc\` holds at \`a\`, premultiplied, as a 2D canvas's source-over. */
 void lay(inout vec4 acc, vec3 c, float a) { a = clamp(a, 0., 1.); acc = vec4(c * a, a) + acc * (1. - a); }
+/** How much of the sun gets through: all under a clear sky, little once it is overcast or foggy. */
+float sunny() { return (1. - smoothstep(.35, .95, u_weather.z)) * (1. - .7 * u_weather.w); }
 `;
 
 const TW = `${COMMON}
@@ -58,29 +65,6 @@ float riverTop(float x) {
   if (x < 420.) return mix(1118., 1098., x / 420.);
   if (x < 560.) return mix(1098., 965., (x - 420.) / 140.);
   return mix(965., 925., (x - 560.) / 451.);
-}
-float rain(vec2 css) {
-  float a = 0.;
-  for (int i = 0; i < 3; i++) {
-    float fi = float(i);
-    float k = 1. - fi * .3;
-    vec2 r = vec2(css.x - css.y * .17, css.y);
-    float w = 7. + fi * 4.;
-    float c = floor(r.x / w);
-    float h = hash12(vec2(c, fi * 13.));
-    float speed = (640. + 260. * h) * k;
-    float seg = 150. + 90. * fi;
-    float y = r.y - u_time * speed + h * 977.;
-    float idx = floor(y / seg);
-    float on = step(.6, hash12(vec2(c, idx + fi * 91.)));
-    float f = fract(y / seg) * seg;
-    float len = (18. + 18. * h) * k;
-    float s = step(f, len) * (f / len);
-    float dx = (fract(r.x / w) - (.3 + .4 * hash12(vec2(c, 7. + fi)))) * w;
-    float line = smoothstep(1.4 * k + .8, 0., abs(dx));
-    a += line * s * on * (.05 * k + .018);
-  }
-  return min(a, .16);
 }
 float ripples(vec2 p, out float inner) {
   vec2 q = vec2(p.x, p.y * 3.2);
@@ -112,20 +96,21 @@ void main() {
   float v = css.y / view.y;
   if (v < .75) {
     float cloud = fbm(vec2(css.x * .006 + u_time * .012, css.y * .011));
-    lay(acc, vec3(0), (.035 + .09 * cloud) * smoothstep(.75, 0., max(v, 0.)));
+    lay(acc, vec3(0), (.035 + .09 * cloud) * (.5 + u_weather.z) * smoothstep(.75, 0., max(v, 0.)));
   }
-  if (u_moving > .5) {
+  float rain = u_weather.x;
+  if (u_moving > .5 && rain > 0.) {
     float water = smoothstep(0., 14., p.y - riverTop(p.x)) * smoothstep(1415., 1385., p.y) * step(0., p.x) * step(p.x, 1011.);
     if (water > 0.) {
       float m = water * (1. - texture(u_ink, v_px / u_target).a);
       if (m > 0.) {
         float inner;
         float ring = ripples(p, inner);
-        lay(acc, vec3(.45, .47, .5), ring * .1 * m);
-        lay(acc, vec3(.99), inner * .14 * m);
+        float k = min(1., rain * 2.);
+        lay(acc, vec3(.45, .47, .5), ring * .1 * m * k);
+        lay(acc, vec3(.99), inner * .14 * m * k);
       }
     }
-    lay(acc, vec3(.58, .6, .63), rain(css));
   }
   color = acc;
 }`;
@@ -194,11 +179,11 @@ void main() {
   float L = 0.;
   if (span > 0.) {
     float rays = smoothstep(.45, .9, noise(vec2(ang * 38., u_time * .05)) * .6 + noise(vec2(ang * 95. + 3., u_time * .035)) * .4);
-    L = span * rays * smoothstep(1500., 120., length(d)) * .85;
+    L = span * rays * smoothstep(1500., 120., length(d)) * .85 * sunny();
   }
   lay(acc, vec3(0), .07 * (1. - L));
   lay(acc, vec3(1., .975, .92), .3 * L * (1. - .8 * inkA));
-  lay(acc, vec3(1., .93, .8), .25 * smoothstep(686., 0., length(p - vec2(200., -1.))) * (1. - inkA));
+  lay(acc, vec3(1., .93, .8), .25 * sunny() * smoothstep(686., 0., length(p - vec2(200., -1.))) * (1. - inkA));
   // The stream in ink and paper, never on the stone.
   float fromBank = inkA < .5 ? fromStreamBank(p) : 0.;
   if (fromBank > 0.) {
@@ -301,7 +286,7 @@ vec4 dust(float sh) {
 }
 void main() {
   vec2 p = (v_px - u_leaf.xy) / u_leaf.z;
-  float sh = shaftAt(p);
+  float sh = shaftAt(p) * mix(.3, 1., sunny());
   // The dust is drawn in a pass of its own, over the figures, so it falls in front of him.
   if (u_over > .5) {
     color = u_moving > .5 && sh > .01 ? dust(sh) : vec4(0);
@@ -366,10 +351,14 @@ export interface Day {
 const isDayPlace = (region: CountryCode): region is DayPlace =>
   region === "TW" || region === "MO" || region === "HK";
 
-/** `region`'s day, or null where it has none or the GPU can't draw it well. */
-export function makeDay(region: CountryCode, gl: InkGL | null): Day | null {
+/**
+ * `region`'s day under the sky `now` says it has, or null where it has none or the GPU can't
+ * draw it well.
+ */
+export function makeDay(region: CountryCode, gl: InkGL | null, now: () => SkyNow): Day | null {
   if (!gl || gl.software || !isDayPlace(region)) return null;
   const queue = (ctx: CanvasRenderingContext2D, { scene, air, still }: Moment, over: boolean) => {
+    const { weather, glow, night } = now();
     const m = ctx.getTransform();
     const { width, height } = ctx.canvas;
     gl.day({
@@ -381,6 +370,8 @@ export function makeDay(region: CountryCode, gl: InkGL | null): Day | null {
       ratio: Math.min(2, window.devicePixelRatio || 1),
       moving: !still,
       over,
+      weather: [weather.rain, weather.snow, weather.cloud, weather.fog],
+      air: [weather.wind, weather.storm ? 1 : 0, glow, night ? 1 : 0],
     });
   };
   return {

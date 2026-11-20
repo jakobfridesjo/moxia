@@ -18,6 +18,7 @@ const AUTHOR = "Jakob Fridesjö";
 
 const CREDITS: { role: keyof Messages["about"]["credits"]; name: string; license: string }[] = [
   { role: "stations", name: "radio-browser.info", license: "Public domain" },
+  { role: "weather", name: "Open-Meteo.com", license: "CC BY 4.0" },
   { role: "decoding", name: "Symphonia", license: "MPL-2.0" },
   { role: "playback", name: "rodio", license: "MIT OR Apache-2.0" },
   { role: "transcription", name: "SenseVoice-Small", license: "FunASR Model License" },

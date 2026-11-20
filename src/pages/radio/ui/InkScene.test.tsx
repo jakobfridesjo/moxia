@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { renderPage } from "@/shared/test/render.tsx";
 import { InkScene } from "@/pages/radio/ui/InkScene.tsx";
 
+const SKY = { weather: null, glow: 0 };
+
 const scene = (covered: boolean) => (
   <InkScene
     region="CN"
@@ -9,6 +11,7 @@ const scene = (covered: boolean) => (
     listening={false}
     writing={false}
     move={null}
+    sky={SKY}
     covered={covered}
   />
 );

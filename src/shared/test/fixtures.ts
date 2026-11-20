@@ -12,6 +12,8 @@ export function makeStation(overrides: Partial<Station> = {}): Station {
     tags: [],
     countryCode: "CN",
     state: null,
+    latitude: null,
+    longitude: null,
     languages: ["chinese"],
     codec: "MP3",
     bitrate: 128,

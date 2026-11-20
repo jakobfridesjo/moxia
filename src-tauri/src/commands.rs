@@ -8,6 +8,7 @@ use radio_core::favicon::Favicons;
 use radio_core::models::{DownloadProgress, Model, ModelStatus, Models};
 use radio_core::player::{Player, PlayerEvent};
 use radio_core::radio_browser::RadioBrowser;
+use radio_core::sky::{LocalWeather, Skies};
 use radio_core::speech::{Script, Speech};
 use radio_core::station::Station;
 use radio_core::store::{Preset, Store};
@@ -41,6 +42,7 @@ pub struct AppState {
     directory: Arc<RadioBrowser>,
     catalog: Catalog,
     pub favicons: Favicons,
+    skies: Skies,
     player: Player,
     tapes: Tapes,
     models: Models,
@@ -68,6 +70,7 @@ impl AppState {
             directory: Arc::new(directory),
             catalog,
             favicons,
+            skies: Skies::new(crate::USER_AGENT),
             player,
             tapes,
             models,
@@ -219,6 +222,19 @@ pub async fn play(
             }
         });
         Ok(())
+    })
+    .await
+}
+
+/// The weather now at a station's place, as its painting shows it.
+#[tauri::command]
+pub async fn local_weather(
+    app: AppHandle,
+    latitude: f64,
+    longitude: f64,
+) -> CommandResult<LocalWeather> {
+    blocking(app, move |state| {
+        Ok(state.skies.weather(latitude, longitude)?)
     })
     .await
 }

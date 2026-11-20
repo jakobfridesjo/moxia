@@ -1,9 +1,12 @@
 import { createAtom } from "@tanstack/react-store";
 import { themeAtom, type Theme } from "@/shared/config/preferences.ts";
 
-/** Whether `theme` means night, when the system is or is not dark. */
-export function isNight(theme: Theme, systemDark: boolean) {
-  return theme === "night" || (theme === "auto" && systemDark);
+/**
+ * Whether `theme` means night. On auto it follows the sun where the station is, `placeNight`,
+ * while the radio shows one, and otherwise the system.
+ */
+export function isNight(theme: Theme, systemDark: boolean, placeNight: boolean | null = null) {
+  return theme === "night" || (theme === "auto" && (placeNight ?? systemDark));
 }
 
 const systemDark =
@@ -11,9 +14,15 @@ const systemDark =
     ? window.matchMedia("(prefers-color-scheme: dark)")
     : null;
 
-/** Whether the app is in its night look now, following the theme setting and, on auto, the system. */
-export const nightAtom = createAtom(isNight(themeAtom.get(), systemDark?.matches ?? false));
+/** Whether the sun is down where the station on show is; null when no station is on show. */
+export const placeNightAtom = createAtom<boolean | null>(null);
 
-const update = () => nightAtom.set(isNight(themeAtom.get(), systemDark?.matches ?? false));
+const nightNow = () => isNight(themeAtom.get(), systemDark?.matches ?? false, placeNightAtom.get());
+
+/** Whether the app is in its night look now, following the theme setting and, on auto, the sun or the system. */
+export const nightAtom = createAtom(nightNow());
+
+const update = () => nightAtom.set(nightNow());
 themeAtom.subscribe(update);
+placeNightAtom.subscribe(update);
 systemDark?.addEventListener("change", update);

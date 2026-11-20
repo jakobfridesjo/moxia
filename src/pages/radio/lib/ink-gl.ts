@@ -10,6 +10,7 @@
 import { inkNoise } from "@/pages/radio/lib/ink-weather.ts";
 import { FALLS_SHADER, MAX_ROWS, type FallsLook } from "@/pages/radio/lib/ink-falls.ts";
 import { DAY_SHADERS, dayLattice, type DayPlace } from "@/pages/radio/lib/ink-day.ts";
+import { SKY } from "@/pages/radio/lib/ink-sky.ts";
 
 /** x, y, width and height, in the target canvas's pixels. */
 type Rect = [number, number, number, number];
@@ -71,7 +72,8 @@ interface FallsDraw {
 }
 
 interface DayDraw {
-  place: DayPlace;
+  /** A place's day, or the live sky over any painting. */
+  place: DayPlace | "SKY";
   rect: Rect;
   /** The scene's ink, lying over the whole target: what lies on water stays out of it. */
   ink: Source;
@@ -84,6 +86,10 @@ interface DayDraw {
   moving: boolean;
   /** Draws only what lies in front of the figures, for after they are drawn. */
   over: boolean;
+  /** Rain, snow, cloud and fog where the station is, each 0 to 1. */
+  weather: [number, number, number, number];
+  /** Wind 0 to 1, lightning 0 or 1, the warmth of dawn or dusk 0 to 1, and 1 at night. */
+  air: [number, number, number, number];
 }
 
 type Draw =
@@ -307,7 +313,7 @@ export function createInkGL(): InkGL | null {
   /** Numbers made once, drawn between their texels: the ink noise and the day's lattice. */
   let floats = new Map<"noise" | "lattice", WebGLTexture>();
   /** Each place's day, compiled the first time it is drawn; null if it would not compile. */
-  let days = new Map<DayPlace, Program | null>();
+  let days = new Map<DayPlace | "SKY", Program | null>();
   let flushes = 0;
   let lost = false;
   /** Let go by its owner: never ready again, even if the context comes back. */
@@ -500,8 +506,9 @@ export function createInkGL(): InkGL | null {
         return;
       }
       case "day": {
-        const { place, rect, ink, leaf, time, ratio, moving, over } = draw.draw;
-        if (!days.has(place)) days.set(place, compile(gl, DAY_SHADERS[place]));
+        const { place, rect, ink, leaf, time, ratio, moving, over, weather, air } = draw.draw;
+        if (!days.has(place))
+          days.set(place, compile(gl, place === "SKY" ? SKY : DAY_SHADERS[place]));
         const chosen = days.get(place);
         if (!chosen) return;
         const uniform = switchTo(chosen);
@@ -514,6 +521,8 @@ export function createInkGL(): InkGL | null {
         gl.uniform1f(uniform("u_ratio"), ratio);
         gl.uniform1f(uniform("u_moving"), moving ? 1 : 0);
         gl.uniform1f(uniform("u_over"), over ? 1 : 0);
+        gl.uniform4f(uniform("u_weather"), ...weather);
+        gl.uniform4f(uniform("u_air"), ...air);
         quad(uniform, rect, target);
         return;
       }

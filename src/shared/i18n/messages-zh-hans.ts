@@ -158,7 +158,7 @@ export const zhHans: Messages = {
     languageDescription: "菜单、按钮和提示所用的语言。",
     theme: "昼夜",
     themeDescription:
-      "入夜后纸色转暗，每幅画各有其光：茶炉、渔火、一炷香、月色。自动则随设备而定。",
+      "入夜后纸色转暗，每幅画各有其光：茶炉、渔火、一炷香、月色。自动则随电台所在地的日出日落，其他页面随设备而定。",
     themeOptions: { auto: "自动", day: "昼", night: "夜" },
     keySounds: "按键声音",
     keySoundsDescription:
@@ -166,7 +166,7 @@ export const zhHans: Messages = {
     switchOptions: { on: "开", off: "关" },
     environment: "天气",
     environmentDescription:
-      "画上飘过的雾、河上的雨、飘落的叶子和白昼的光。关掉后画面静止，更省电。",
+      "画上飘过的雾、河上的雨、飘落的叶子和白昼的光。天气随电台所在地的实际天气而变，取自 Open-Meteo。关掉后画面静止，更省电，也不联网查询天气。",
     shaders: "着色器",
     shadersDescription:
       "雾、雨、光和换地方的晕染由显卡绘制。画面闪烁或耗电时可以关掉；之后画面静止，没有天气，夜里的灯光仍在，但不再闪动。",
@@ -217,6 +217,7 @@ export const zhHans: Messages = {
     packages: (count: number) => `${formatInteger(count)} 个软件包`,
     credits: {
       stations: "电台目录",
+      weather: "天气数据",
       decoding: "音频解码",
       playback: "音频播放",
       transcription: "语音识别",

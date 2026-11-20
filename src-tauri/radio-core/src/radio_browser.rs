@@ -33,6 +33,10 @@ struct ApiStation {
     favicon: String,
     tags: String,
     state: String,
+    #[serde(default)]
+    geo_lat: Option<f64>,
+    #[serde(default)]
+    geo_long: Option<f64>,
     language: String,
     codec: String,
     bitrate: u32,
@@ -159,6 +163,7 @@ fn station(api: ApiStation, country: Country) -> Option<Station> {
         return None;
     }
     let codec = api.codec.trim();
+    let place = coordinates(api.geo_lat, api.geo_long);
     Some(Station {
         id: api.stationuuid,
         name: name.to_owned(),
@@ -168,6 +173,8 @@ fn station(api: ApiStation, country: Country) -> Option<Station> {
         tags: list(&api.tags),
         country_code: country,
         state: non_empty(api.state),
+        latitude: place.map(|(latitude, _)| latitude),
+        longitude: place.map(|(_, longitude)| longitude),
         languages: list(&api.language),
         codec: (!codec.is_empty() && codec != "UNKNOWN").then(|| codec.to_owned()),
         bitrate: (api.bitrate > 0).then_some(api.bitrate),
@@ -175,6 +182,14 @@ fn station(api: ApiStation, country: Country) -> Option<Station> {
         votes: api.votes,
         click_count: api.clickcount,
     })
+}
+
+/// A real place: many stations are filed at 0, 0 or out of range.
+fn coordinates(latitude: Option<f64>, longitude: Option<f64>) -> Option<(f64, f64)> {
+    let (latitude, longitude) = (latitude?, longitude?);
+    let real =
+        latitude.abs() <= 90.0 && longitude.abs() <= 180.0 && (latitude != 0.0 || longitude != 0.0);
+    real.then_some((latitude, longitude))
 }
 
 fn non_empty(text: String) -> Option<String> {
@@ -207,14 +222,23 @@ mod tests {
              "url_resolved": "https://cdn.x/a.m3u8", "homepage": "", "favicon": "https://x/a.png",
              "tags": "news, 新闻,news,", "state": "北京", "language": "mandarin,chinese",
              "codec": "UNKNOWN", "bitrate": 0, "hls": 1, "votes": 3, "clickcount": 9,
-             "lastcheckok": 1},
+             "lastcheckok": 1, "geo_lat": 39.9, "geo_long": 116.4},
             {"stationuuid": "b", "name": "No stream", "url": "rtmp://x", "url_resolved": "",
              "homepage": "", "favicon": "", "tags": "", "state": "", "language": "",
-             "codec": "MP3", "bitrate": 128, "hls": 0, "votes": 0, "clickcount": 0}
+             "codec": "MP3", "bitrate": 128, "hls": 0, "votes": 0, "clickcount": 0},
+            {"stationuuid": "c", "name": "Nowhere", "url": "http://x/c.mp3", "url_resolved": "",
+             "homepage": "", "favicon": "", "tags": "", "state": "", "language": "",
+             "codec": "MP3", "bitrate": 128, "hls": 0, "votes": 0, "clickcount": 0,
+             "geo_lat": 0.0, "geo_long": 0.0}
         ]"#;
         let stations = parse_stations(body, Country::China).unwrap();
-        assert_eq!(stations.len(), 1);
+        assert_eq!(stations.len(), 2);
+        assert_eq!(stations[1].latitude, None);
         let station = &stations[0];
+        assert_eq!(
+            (station.latitude, station.longitude),
+            (Some(39.9), Some(116.4))
+        );
         assert_eq!(station.name, "中国之声");
         assert_eq!(station.stream_url, "https://cdn.x/a.m3u8");
         assert_eq!(station.homepage, None);

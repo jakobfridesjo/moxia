@@ -7,6 +7,7 @@ import { makeWeather } from "@/pages/radio/lib/ink-weather.ts";
 import { DAY_TONE } from "@/pages/radio/lib/ink-tone.ts";
 import { bloomer } from "@/pages/radio/lib/ink-bloom.ts";
 import { makeDay } from "@/pages/radio/lib/ink-day.ts";
+import { makeSky, weatherFor, type SkyNow } from "@/pages/radio/lib/ink-sky.ts";
 import { createInkGL, type InkGL } from "@/pages/radio/lib/ink-gl.ts";
 
 /*
@@ -203,12 +204,18 @@ describe("the bloom on the GPU", () => {
 describe("the day on the GPU", () => {
   /** The renderer as a real GPU would report it: the test browser's WebGL runs on the CPU. */
   const gpu = (): InkGL => ({ ...renderer(), ready: true, software: false });
+  /** Each painting's own weather, as it shows while the real one is not known. */
+  const skyOf = (region: "CN" | "TW" | "MO" | "HK") => (): SkyNow => ({
+    weather: weatherFor(region, null),
+    glow: 0,
+    night: false,
+  });
 
   for (const region of ["TW", "MO", "HK"] as const)
     it(`lays ${region}'s weather and light over the leaf`, async () => {
       const { scene } = await sceneOf(region, false);
       const gl = gpu();
-      const day = makeDay(region, gl);
+      const day = makeDay(region, gl, skyOf(region));
       if (!day) throw new Error(`no day for ${region}`);
       const pixels = drawn(scene, (ctx) => {
         day.draw(ctx, { scene, air: PLAYING, still: false });
@@ -222,7 +229,7 @@ describe("the day on the GPU", () => {
     for (const region of ["TW", "MO", "HK"] as const) {
       const { scene } = await sceneOf(region, false);
       const gl = gpu();
-      const day = makeDay(region, gl);
+      const day = makeDay(region, gl, skyOf(region));
       const over = (still: boolean) =>
         drawn(scene, (ctx) => {
           day?.over(ctx, { scene, air: PLAYING, still });
@@ -234,13 +241,31 @@ describe("the day on the GPU", () => {
   });
 
   it("is left out where there is no day, or the GPU is the CPU", () => {
-    expect(makeDay("CN", gpu())).toBeNull();
-    expect(makeDay("HK", renderer())).toBeNull();
-    expect(makeDay("HK", null)).toBeNull();
+    expect(makeDay("CN", gpu(), skyOf("CN"))).toBeNull();
+    expect(makeDay("HK", renderer(), skyOf("HK"))).toBeNull();
+    expect(makeDay("HK", null, skyOf("HK"))).toBeNull();
+  });
+
+  it("lays real rain, snow, fog and dusk over any painting, but not on the CPU", async () => {
+    const { scene } = await sceneOf("CN", false);
+    const clear = { rain: 0, snow: 0, cloud: 0, fog: 0, wind: 0, storm: false };
+    const skyWith = (sky: Partial<SkyNow>) => {
+      const gl = gpu();
+      const overhead = makeSky(gl, () => ({ weather: clear, glow: 0, night: false, ...sky }));
+      return drawn(scene, (ctx) => {
+        overhead?.draw(ctx, { scene, air: PLAYING, still: false });
+        gl.flush(ctx);
+      });
+    };
+    expect(inked(skyWith({}))).toBe(false);
+    for (const weather of [{ rain: 1 }, { snow: 1 }, { fog: 1 }])
+      expect(inked(skyWith({ weather: { ...clear, ...weather } }))).toBe(true);
+    expect(inked(skyWith({ glow: 1 }))).toBe(true);
+    expect(makeSky(renderer(), skyOf("CN"))).toBeNull();
   });
 
   it("takes the painted smoke out of the leaf where the live smoke rises", async () => {
-    const day = makeDay("HK", gpu());
+    const day = makeDay("HK", gpu(), skyOf("HK"));
     const image = await leaf("HK");
     const paint = (erased?: { box: [number, number, number, number]; feather: number } | null) =>
       paintScene(document.createElement("canvas"), {

@@ -19,6 +19,9 @@ export interface Station {
   countryCode: CountryCode;
   /** Province or region. */
   state: string | null;
+  /** Where the station is, in degrees, when radio-browser knows. */
+  latitude: number | null;
+  longitude: number | null;
   languages: string[];
   codec: string | null;
   /** In kbps. */
@@ -137,6 +140,17 @@ export interface InviteCode {
   };
 }
 
+/** How much rain, snow, cloud, fog and wind a station's painting shows, each 0 to 1. */
+export interface LocalWeather {
+  rain: number;
+  snow: number;
+  cloud: number;
+  fog: number;
+  wind: number;
+  /** Thunder, so lightning. */
+  storm: boolean;
+}
+
 /** Every Rust command: `commands` and the test mocks accept only these names. */
 export type CommandName =
   | "list_stations"
@@ -146,6 +160,7 @@ export type CommandName =
   | "set_preset"
   | "list_recent"
   | "get_favicon"
+  | "local_weather"
   | "play"
   | "stop"
   | "set_volume"
@@ -192,6 +207,10 @@ export const commands = {
 
   /** A station's favicon as a `data:` URL, fetched and kept by Rust; null when it has none. */
   getFavicon: (url: string) => invoke<string | null>("get_favicon", { url }),
+
+  /** The weather now at a place, from Open-Meteo. */
+  localWeather: (latitude: number, longitude: number) =>
+    invoke<LocalWeather>("local_weather", { latitude, longitude }),
 
   /**
    * Stops whatever plays and starts `station`, reporting on `onEvent` until it stops.

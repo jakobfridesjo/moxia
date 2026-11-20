@@ -5,6 +5,7 @@ import { formatShortDateTime } from "@/shared/lib/date.ts";
 import { formatTapeTime } from "@/shared/lib/duration.ts";
 import { cn } from "@/shared/lib/class-names.ts";
 import { noteAt } from "@/pages/radio/model/radio-state.ts";
+import { useLocalSky } from "@/pages/radio/model/use-local-sky.ts";
 import { useListenTogether } from "@/pages/radio/model/use-listen-together.ts";
 import { useRadioManager } from "@/pages/radio/model/use-radio-manager.ts";
 import { ChatDrift } from "@/pages/radio/ui/ChatDrift.tsx";
@@ -119,6 +120,7 @@ function RadioManager() {
     (radio.connecting ? m.radio.connecting : extraLine) ??
     (radio.subtitles === "loading" ? m.radio.subtitlesLoading : null);
   const region = showing?.countryCode ?? "CN";
+  const sky = useLocalSky(region, showing ?? null);
   const hint =
     radio.hint ??
     notice ??
@@ -162,6 +164,7 @@ function RadioManager() {
           listening={mode === "live" || mode === "playback"}
           writing={radio.recording}
           move={move}
+          sky={sky}
           covered={pathOpen}
         />
 

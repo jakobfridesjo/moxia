@@ -30,6 +30,8 @@ import { listenToAir } from "@/pages/radio/lib/air.ts";
 import { makeWeather, type Weather } from "@/pages/radio/lib/ink-weather.ts";
 import { lightOnce, makeNight, NIGHT_LOOK, type Night } from "@/pages/radio/lib/ink-night.ts";
 import { makeDay, type Day } from "@/pages/radio/lib/ink-day.ts";
+import { makeSky, weatherFor, type Sky, type SkyNow } from "@/pages/radio/lib/ink-sky.ts";
+import type { LocalSky } from "@/pages/radio/model/use-local-sky.ts";
 import { DAY_TONE } from "@/pages/radio/lib/ink-tone.ts";
 import { bloomer } from "@/pages/radio/lib/ink-bloom.ts";
 import { AMBIENT_FRAME_MS, FRAME_SLACK_MS } from "@/pages/radio/lib/ink-pace.ts";
@@ -54,6 +56,8 @@ interface InkSceneProps {
   writing: boolean;
   /** Changing station blows mist across the painting; changing place soaks the new one in from the finger. */
   move: Move | null;
+  /** The real sky where the station is: its weather, when known, and the light of dawn or dusk. */
+  sky: LocalSky;
   /** Something opaque lies over the painting, so what moves in it rests. */
   covered?: boolean;
 }
@@ -87,6 +91,7 @@ export function InkScene({
   listening,
   writing,
   move,
+  sky,
   covered = false,
 }: InkSceneProps) {
   const night = useSelector(nightAtom);
@@ -147,9 +152,16 @@ export function InkScene({
       weather.current = null;
       lighting.current = null;
       daylight.current = null;
+      overhead.current = null;
     },
     [shaders]
   );
+  // The sky changes without repainting: the shaders read it each frame.
+  const skyNow = useRef<SkyNow>({ weather: weatherFor(region, null), glow: 0, night });
+  useEffect(() => {
+    skyNow.current = { weather: weatherFor(region, sky.weather), glow: sky.glow, night };
+  }, [region, sky.weather, sky.glow, night]);
+  const overhead = useRef<Sky | null>(null);
   const toneNow = useRef(tone);
   const lastMove = useRef(move);
   useEffect(() => {
@@ -178,7 +190,8 @@ export function InkScene({
       const ground = night ? NIGHT_LOOK[region] : undefined;
       // Without shaders the painting holds still: no weather or bloom, and its night light is painted in once.
       const gl = image ? gpuOf() : null;
-      const day = gl && environment && !night ? makeDay(region, gl) : null;
+      const readSky = () => skyNow.current;
+      const day = gl && environment && !night ? makeDay(region, gl, readSky) : null;
       const scene = paintScene(canvas, {
         region,
         width: element.clientWidth,
@@ -201,6 +214,7 @@ export function InkScene({
             : null;
       lighting.current = gl && night && image ? makeNight(region, image, gl) : null;
       daylight.current = day;
+      overhead.current = gl && environment ? makeSky(gl, readSky) : null;
       canvas.style.zIndex = "1";
       old.style.zIndex = "0";
       shown.current = next;
@@ -401,6 +415,7 @@ export function InkScene({
       gl?.flush(ctx);
       if (gl && environment && !still) drawDrift(ctx, (now / 1000) * 6, tone);
       if (!held) drawListener(ctx, scene, listenerPose);
+      overhead.current?.draw(ctx, moment);
       weather.current?.veil(ctx, air);
       if (moved?.kind === "station" && moved.id !== lastGust) {
         lastGust = moved.id;

@@ -5,6 +5,7 @@ pub mod models;
 pub mod onnx;
 pub mod player;
 pub mod radio_browser;
+pub mod sky;
 pub mod speech;
 pub mod station;
 pub mod store;

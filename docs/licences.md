@@ -7,7 +7,10 @@ Moxia is licensed under either [Apache License 2.0](../LICENSE-APACHE) or [MIT](
 | Source                                                                     | Licence       | Used as                             |
 | -------------------------------------------------------------------------- | ------------- | ----------------------------------- |
 | [radio-browser](https://www.radio-browser.info/)                           | Public domain | Fetched at runtime, cached          |
+| [Open-Meteo](https://open-meteo.com/) current weather                      | CC BY 4.0     | Fetched at runtime, for the weather |
 | [OpenCC](https://github.com/BYVoid/OpenCC) dictionaries, in ferrous-opencc | Apache-2.0    | Built in, for traditional subtitles |
+
+With weather on, the radio asks Open-Meteo's free API for the weather where the station on show is, about every half hour: only the station's coordinates, rounded to about a kilometre, are sent. The About page credits it, as CC BY 4.0 asks; the free API is for non-commercial use.
 
 Listening together reaches other listeners through n0's public [iroh](https://iroh.computer) relays and DNS (`iroh.link`) when it cannot connect directly; they pass the encrypted connections on and publish each room's addresses under its throwaway key, and see nothing of what is said. They are rate-limited and run by number 0 as a free service.
 

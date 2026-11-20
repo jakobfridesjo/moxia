@@ -7,6 +7,12 @@ describe("isNight", () => {
     expect(isNight("auto", false)).toBe(false);
   });
 
+  it("follows the sun at the station's place on auto, over the system", () => {
+    expect(isNight("auto", false, true)).toBe(true);
+    expect(isNight("auto", true, false)).toBe(false);
+    expect(isNight("day", true, true)).toBe(false);
+  });
+
   it("holds day or night whatever the system", () => {
     expect(isNight("day", true)).toBe(false);
     expect(isNight("night", false)).toBe(true);

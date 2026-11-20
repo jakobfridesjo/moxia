@@ -12,7 +12,7 @@ use tauri::Manager;
 use crate::commands::AppState;
 
 /// How the app introduces itself to radio-browser and to stations, as radio-browser asks.
-const USER_AGENT: &str = concat!("Moxia/", env!("CARGO_PKG_VERSION"));
+pub(crate) const USER_AGENT: &str = concat!("Moxia/", env!("CARGO_PKG_VERSION"));
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -66,6 +66,7 @@ pub fn run() {
             commands::set_preset,
             commands::list_recent,
             commands::get_favicon,
+            commands::local_weather,
             commands::play,
             commands::stop,
             commands::set_volume,
