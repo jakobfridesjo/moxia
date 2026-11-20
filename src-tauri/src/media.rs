@@ -13,6 +13,10 @@ use tauri::ipc::Channel;
 /// A button pressed on the system's media controls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    not(desktop),
+    expect(dead_code, reason = "on a phone the Kotlin plugin sends these")
+)]
 pub enum MediaAction {
     Play,
     Pause,
