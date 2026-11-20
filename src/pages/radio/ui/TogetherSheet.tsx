@@ -1,11 +1,13 @@
-import { useId, useState } from "react";
-import { X } from "lucide-react";
+import { useCallback, useId, useState } from "react";
+import { ScanQrCode, X } from "lucide-react";
+import { camera, canScan } from "@/shared/api/commands.ts";
 import { useMessages } from "@/shared/i18n/messages.ts";
 import { cn } from "@/shared/lib/class-names.ts";
 import { Button } from "@/shared/ui/shadcn/button.tsx";
 import { Input } from "@/shared/ui/shadcn/input.tsx";
 import type { RoomState } from "@/pages/radio/model/room-store.ts";
 import { InviteQr } from "@/pages/radio/ui/InviteQr.tsx";
+import { ScanFrame } from "@/pages/radio/ui/ScanFrame.tsx";
 
 interface TogetherSheetProps {
   room: RoomState;
@@ -31,9 +33,27 @@ export function TogetherSheet({
   const t = m.together;
   const [tab, setTab] = useState<"invite" | "join">("invite");
   const [pasted, setPasted] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const ids = { title: useId(), name: useId(), invite: useId(), paste: useId() };
   const busy = room.status === "opening" || room.status === "joining";
   const named = name.trim().length > 0;
+  // A scanned invite is joined at once when there is a name to join under; else it waits pasted.
+  const scanInvite = async () => {
+    setScanError(null);
+    setScanning(true);
+    try {
+      const scanned = await camera.scanQrCode();
+      if (scanned === null) return setScanError(t.cameraRefused);
+      setPasted(scanned);
+      if (named) onJoin(scanned);
+    } catch (error) {
+      if (error !== "cancelled") setScanError(t.scanFailed);
+    } finally {
+      setScanning(false);
+    }
+  };
+  const cancelScan = useCallback(() => void camera.cancelScan().catch(() => undefined), []);
 
   return (
     <section
@@ -126,6 +146,25 @@ export function TogetherSheet({
                     if (named && pasted.trim()) onJoin(pasted);
                   }}
                 >
+                  {canScan && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="lg"
+                      disabled={busy || scanning}
+                      onClick={() => void scanInvite()}
+                      className="h-12"
+                    >
+                      <ScanQrCode />
+                      {t.scan}
+                    </Button>
+                  )}
+                  {scanning && <ScanFrame onCancel={cancelScan} />}
+                  {scanError && (
+                    <p role="alert" className="text-sm text-seal">
+                      {scanError}
+                    </p>
+                  )}
                   <label htmlFor={ids.paste} className="text-sm font-bold">
                     {t.paste}
                   </label>

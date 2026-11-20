@@ -45,11 +45,10 @@ const pathOf = (points: Point[]) => {
 };
 
 /**
- * A dark ground the size of the canvas: `base`, moonlight falling from the top as [stop, alpha]
- * pairs, and a grain of light and dark specks up to `grain` (of 255) deep, so the dark reads as
- * paper rather than a flat fill.
+ * A dark ground the size of the canvas: `base`, and moonlight falling from the top as
+ * [stop, alpha] pairs.
  */
-function ground(base: string, moon: [number, number][], grain: number) {
+function ground(base: string, moon: [number, number][]) {
   return (ctx: Context) => {
     const { width, height } = ctx.canvas;
     ctx.fillStyle = base;
@@ -60,16 +59,6 @@ function ground(base: string, moon: [number, number][], grain: number) {
       ctx.fillStyle = light;
       ctx.fillRect(0, 0, width, height);
     }
-    const pixels = ctx.getImageData(0, 0, width, height);
-    const random = seeded(21);
-    const { data } = pixels;
-    for (let i = 0; i < data.length; i += 4) {
-      const speck = random();
-      const target = speck > 0.5 ? 255 : 0;
-      const depth = (Math.abs(speck - 0.5) * 2 * grain) / 255;
-      for (let c = i; c < i + 3; c++) data[c] += (target - data[c]) * depth;
-    }
-    ctx.putImageData(pixels, 0, 0);
   };
 }
 
@@ -83,7 +72,7 @@ export const NIGHT_LOOK: Record<
 > = {
   // Lit by the fire, a little moonlight on the open sky above: its haze glows faintly warm.
   CN: {
-    paint: ground("#0c0704", [], 11),
+    paint: ground("#0c0704", []),
     inkStrength: 1,
     tone: {
       ...NIGHT_TONE,
@@ -97,45 +86,33 @@ export const NIGHT_LOOK: Record<
     },
   },
   TW: {
-    paint: ground(
-      "#080b0d",
-      [
-        [0, 0.6],
-        [0.35, 0.56],
-        [0.6, 0.22],
-        [1, 0],
-      ],
-      5
-    ),
+    paint: ground("#080b0d", [
+      [0, 0.6],
+      [0.35, 0.56],
+      [0.6, 0.22],
+      [1, 0],
+    ]),
     inkStrength: 1,
     tone: NIGHT_TONE,
   },
   // Almost dark: what mist there is barely shows.
   HK: {
-    paint: ground(
-      "#060403",
-      [
-        [0, 0.14],
-        [0.5, 0.1],
-        [1, 0.05],
-      ],
-      4
-    ),
+    paint: ground("#060403", [
+      [0, 0.14],
+      [0.5, 0.1],
+      [1, 0.05],
+    ]),
     inkStrength: 1,
     tone: { ...NIGHT_TONE, paper: "6,4,3", mist: "70,72,78", mistAlpha: 0.5 },
   },
   // Its own banks of fog drift over the leaf's mist, so that lies thinner.
   MO: {
-    paint: ground(
-      "#080b0d",
-      [
-        [0, 0.48],
-        [0.4, 0.34],
-        [0.7, 0.15],
-        [1, 0.02],
-      ],
-      5
-    ),
+    paint: ground("#080b0d", [
+      [0, 0.48],
+      [0.4, 0.34],
+      [0.7, 0.15],
+      [1, 0.02],
+    ]),
     inkStrength: 1.4,
     tone: { ...NIGHT_TONE, mistAlpha: 0.12 },
   },
@@ -373,15 +350,25 @@ const pixel = (ctx: Context) => 1 / Math.hypot(ctx.getTransform().a, ctx.getTran
 
 // Lu Tong's tea stove: the fire under the kettle lights the leaf around it, flickering.
 const FIRE: Point = [775, 1448];
+/** Where its light is thrown: up onto the poet, off the foot of the leaf. */
+const FIRELIT: Point = [735, 1270];
 /** How far the firelight reaches, in units. */
 const REACH = 1250;
 
-/** Out of the fire's reach, as [offset, alpha] of black. */
+/** The night over the whole leaf, thin in the firelight and closing beyond its reach, as [offset, alpha] of black. */
 const BEYOND_FIRE: [number, number][] = [
-  [0, 0],
-  [0.42, 0],
-  [0.72, 0.3],
-  [1, 0.52],
+  [0, 0.2],
+  [0.42, 0.24],
+  [0.72, 0.48],
+  [1, 0.66],
+];
+
+/** The stove's own shadow along the foot of the leaf, left of it: where, how tall, and how many times as wide. */
+const FOOT = { at: [300, 1700] as Point, reach: 300, stretch: 3 };
+const FOOT_SHADOW: [number, number][] = [
+  [0, 0.7],
+  [0.6, 0.45],
+  [1, 0],
 ];
 
 /**
@@ -503,7 +490,7 @@ function moonlightOver(image: ImageBitmap) {
   return soft;
 }
 
-function teaStove(image: ImageBitmap, gl: InkGL | null): Night {
+function teaStove(image: ImageBitmap, gl: InkGL | null, moon: () => number): Night {
   const scratch = canvasOf(1, 1);
   const fireflies = firefliesIn(83);
   const moonlight = moonlightOver(image);
@@ -519,11 +506,12 @@ function teaStove(image: ImageBitmap, gl: InkGL | null): Night {
         0.03 * Math.sin(t * 23.1);
       const fires = [
         {
+          at: FIRELIT,
           radius: REACH * (0.85 + 0.15 * flick),
           color: "255,142,46",
           stops: [
-            [0, flick],
-            [0.06, 0.92 * flick],
+            [0, 0.85 * flick],
+            [0.06, 0.8 * flick],
             [0.16, 0.71 * flick],
             [0.3, 0.47 * flick],
             [0.5, 0.24 * flick],
@@ -532,6 +520,17 @@ function teaStove(image: ImageBitmap, gl: InkGL | null): Night {
           ] as [number, number][],
         },
         {
+          at: FIRE,
+          radius: 230,
+          color: "255,142,46",
+          stops: [
+            [0, 0.6 * flick],
+            [0.35, 0.3 * flick],
+            [1, 0],
+          ] as [number, number][],
+        },
+        {
+          at: FIRE,
           radius: 72,
           color: "255,132,36",
           stops: [
@@ -558,15 +557,17 @@ function teaStove(image: ImageBitmap, gl: InkGL | null): Night {
           gl.image({
             source: moonlight,
             rect: [m.e, m.f, leaf[2] * m.a, leaf[3] * m.d],
-            alpha: 1,
+            alpha: moon(),
           });
-          for (const fire of fires) glGlow(gl, ctx, FIRE, fire.radius, fire.color, fire.stops);
+          for (const fire of fires) glGlow(gl, ctx, fire.at, fire.radius, fire.color, fire.stops);
           for (const pool of pools) glGlow(gl, ctx, pool.at, pool.radius, FIREFLY, pool.stops);
         });
       else
         behindInk(ctx, { scene, held }, scratch, (g) => {
+          g.globalAlpha = moon();
           g.drawImage(moonlight, ...leaf);
-          for (const fire of fires) glow(g, FIRE, fire.radius, fire.color, fire.stops);
+          g.globalAlpha = 1;
+          for (const fire of fires) glow(g, fire.at, fire.radius, fire.color, fire.stops);
           for (const pool of pools) glow(g, pool.at, pool.radius, FIREFLY, pool.stops);
         });
     },
@@ -603,14 +604,20 @@ function teaStove(image: ImageBitmap, gl: InkGL | null): Night {
         },
       ]);
       if (gl?.ready) {
-        glGlow(gl, ctx, FIRE, REACH, "0,0,0", BEYOND_FIRE, { cover: true });
+        glGlow(gl, ctx, FIRELIT, REACH, "0,0,0", BEYOND_FIRE, { cover: true });
+        glGlow(gl, ctx, FOOT.at, FOOT.reach, "0,0,0", FOOT_SHADOW, { stretch: FOOT.stretch });
         for (const spark of sparks) glGlow(gl, ctx, spark.at, spark.radius, FIREFLY, spark.stops);
         return;
       }
-      const reach = ctx.createRadialGradient(...FIRE, 0, ...FIRE, REACH);
+      const reach = ctx.createRadialGradient(...FIRELIT, 0, ...FIRELIT, REACH);
       for (const [stop, alpha] of BEYOND_FIRE) reach.addColorStop(stop, `rgba(0,0,0,${alpha})`);
       ctx.fillStyle = reach;
       ctx.fillRect(-1000, -1000, 4000, 4000);
+      ctx.save();
+      ctx.translate(...FOOT.at);
+      ctx.scale(FOOT.stretch, 1);
+      glow(ctx, [0, 0], FOOT.reach, "0,0,0", FOOT_SHADOW);
+      ctx.restore();
       for (const spark of sparks) glow(ctx, spark.at, spark.radius, FIREFLY, spark.stops);
     },
   };
@@ -629,7 +636,7 @@ const RIVER: Point[] = [
 /** Where the lamp's reflection starts below the hull, and how far down it breaks up. */
 const REFLECTION = { top: 1138, depth: 240 };
 
-function boatLamp(image: ImageBitmap, gl: InkGL | null): Night {
+function boatLamp(image: ImageBitmap, gl: InkGL | null, moon: () => number): Night {
   const scratch = canvasOf(1, 1);
   const bare = bareOf(image);
   const glints = glintsIn(pathOf(RIVER), bare, {
@@ -692,7 +699,7 @@ function boatLamp(image: ImageBitmap, gl: InkGL | null): Night {
           .map(Math.round)
           .join(",");
         sparkle(ctx, [glint.x, glint.y], {
-          alpha: pulse * (0.18 * (1 - near) + 0.35 * flick * near),
+          alpha: pulse * (0.18 * (1 - near) * moon() + 0.35 * flick * near),
           length: 8 * glint.length,
           thickness: thickness * (1 + near),
           color: warm,
@@ -950,7 +957,7 @@ function fogBank(width: number, height: number, seed: number) {
 
 const wrap = (value: number, span: number) => ((value % span) + span) % span;
 
-function moonlitFalls(image: ImageBitmap, gl: InkGL | null): Night {
+function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number): Night {
   const scratch = canvasOf(1, 1);
   const stream = pathOf(STREAM);
   const fall = pathOf(FALL);
@@ -1101,19 +1108,22 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null): Night {
     under: (ctx, { scene, held, time, still }) => {
       const parts = make(ctx, scene);
       const t = still ? 0 : time;
-      const breathe = 0.92 + 0.08 * Math.sin(t * 0.21);
+      // Cloud hides the moon: its beams and sheen go, and the sky glows less.
+      const through = moon();
+      const breathe = (0.92 + 0.08 * Math.sin(t * 0.21)) * (0.4 + 0.6 * through);
       const sky: [number, number][] = [
         [0, 0.62 * breathe],
         [0.35, 0.36 * breathe],
         [0.7, 0.1 * breathe],
         [1, 0],
       ];
-      const inletAlpha = 0.85 + 0.15 * Math.sin(t * 0.17);
-      const beamAlpha = (i: number) => 0.72 + 0.28 * Math.sin(t * (0.22 + i * 0.07) + i * 2.1);
+      const inletAlpha = (0.85 + 0.15 * Math.sin(t * 0.17)) * through;
+      const beamAlpha = (i: number) =>
+        (0.72 + 0.28 * Math.sin(t * (0.22 + i * 0.07) + i * 2.1)) * through;
       if (gl?.ready && !held) {
         gl.behindInk(scene.ink, () => {
           glGlow(gl, ctx, SKY_GLOW.at, SKY_GLOW.reach, "226,234,248", sky);
-          glLayer(gl, parts.sheen, 1);
+          glLayer(gl, parts.sheen, through);
         });
         glLayer(gl, parts.inlet, inletAlpha);
         parts.beams.forEach((beam, i) => glLayer(gl, beam, beamAlpha(i)));
@@ -1123,6 +1133,7 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null): Night {
         glow(g, SKY_GLOW.at, SKY_GLOW.reach, "226,234,248", sky);
         g.save();
         g.setTransform(1, 0, 0, 1, 0, 0);
+        g.globalAlpha = through;
         g.drawImage(parts.sheen, 0, 0);
         g.restore();
       });
@@ -1170,7 +1181,7 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null): Night {
           });
         gl.fill([0, 0, 0], 0.3);
         gl.flush(ctx);
-        sparkleGlints(ctx, time, still);
+        sparkleGlints(ctx, time, still, moon());
         return;
       }
       ctx.save();
@@ -1194,12 +1205,12 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null): Night {
       }
       ctx.restore();
       dim(ctx, 0.3);
-      sparkleGlints(ctx, time, still);
+      sparkleGlints(ctx, time, still, moon());
     },
   };
 
   /** Moonlight catching on the water: each glint flares and fades. */
-  function sparkleGlints(ctx: Context, time: number, still: boolean) {
+  function sparkleGlints(ctx: Context, time: number, still: boolean, through: number) {
     const t = still ? 0 : time;
     const thickness = Math.max(pixel(ctx), 1.7);
     for (const glint of glints) {
@@ -1209,7 +1220,7 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null): Night {
         // fades in and out over each slide, so it is gone when it starts again from the top.
         const slid = wrap(t * 20 + glint.phase * 30, 60);
         sparkle(ctx, [glint.x, glint.y + slid], {
-          alpha: rise ** 3 * Math.sin((Math.PI * slid) / 60) ** 2 * 0.26,
+          alpha: rise ** 3 * Math.sin((Math.PI * slid) / 60) ** 2 * 0.26 * through,
           length: 9 * glint.length,
           thickness: thickness * 2.2,
           color: "226,234,248",
@@ -1217,7 +1228,7 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null): Night {
         });
         continue;
       }
-      const alpha = rise ** 10 * 0.56;
+      const alpha = rise ** 10 * 0.56 * through;
       if (alpha < 0.02) continue;
       sparkle(ctx, [glint.x, glint.y], {
         alpha,
@@ -1239,16 +1250,21 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null): Night {
  * dark lie on the GPU and may still wait in it after `under` and `over`: flush `gl` onto the
  * canvas before drawing anything else there.
  */
-export function makeNight(region: CountryCode, image: ImageBitmap, gl: InkGL | null = null): Night {
+export function makeNight(
+  region: CountryCode,
+  image: ImageBitmap,
+  gl: InkGL | null = null,
+  moon: () => number = () => 1
+): Night {
   switch (region) {
     case "CN":
-      return teaStove(image, gl);
+      return teaStove(image, gl, moon);
     case "TW":
-      return boatLamp(image, gl);
+      return boatLamp(image, gl, moon);
     case "HK":
       return incense(gl);
     case "MO":
-      return moonlitFalls(image, gl);
+      return moonlitFalls(image, gl, moon);
   }
 }
 

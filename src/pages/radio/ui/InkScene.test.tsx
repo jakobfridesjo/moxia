@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderPage } from "@/shared/test/render.tsx";
 import { InkScene } from "@/pages/radio/ui/InkScene.tsx";
 
-const SKY = { weather: null, glow: 0 };
+const SKY = { weather: null, glow: 0, moon: 1 };
 
 const scene = (covered: boolean) => (
   <InkScene

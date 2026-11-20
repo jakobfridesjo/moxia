@@ -23,79 +23,160 @@ function blurLines(
 ) {
   const line = new Float32Array(length * 4);
   const span = radius * 2 + 1;
-  const sum = new Float32Array(4);
+  const jump = step * 4;
   for (let l = 0; l < count; l++) {
-    const at = (k: number) => (l * stride + k * step) * 4;
-    for (let k = 0; k < length; k++) line.set(data.subarray(at(k), at(k) + 4), k * 4);
-    sum.fill(0);
-    for (let k = 0; k <= radius && k < length; k++)
-      for (let c = 0; c < 4; c++) sum[c] += line[k * 4 + c];
-    for (let k = 0; k < length; k++) {
-      for (let c = 0; c < 4; c++) data[at(k) + c] = sum[c] / span;
-      const enter = k + radius + 1;
-      const leave = k - radius;
-      if (enter < length) for (let c = 0; c < 4; c++) sum[c] += line[enter * 4 + c];
-      if (leave >= 0) for (let c = 0; c < 4; c++) sum[c] -= line[leave * 4 + c];
+    const start = l * stride * 4;
+    for (let k = 0, at = start; k < length * 4; k += 4, at += jump) {
+      line[k] = data[at];
+      line[k + 1] = data[at + 1];
+      line[k + 2] = data[at + 2];
+      line[k + 3] = data[at + 3];
+    }
+    let [r, g, b, a] = [0, 0, 0, 0];
+    for (let k = 0; k <= radius && k < length; k++) {
+      r += line[k * 4];
+      g += line[k * 4 + 1];
+      b += line[k * 4 + 2];
+      a += line[k * 4 + 3];
+    }
+    for (let k = 0, at = start; k < length; k++, at += jump) {
+      data[at] = r / span;
+      data[at + 1] = g / span;
+      data[at + 2] = b / span;
+      data[at + 3] = a / span;
+      const enter = (k + radius + 1) * 4;
+      const leave = (k - radius) * 4;
+      if (enter < length * 4) {
+        r += line[enter];
+        g += line[enter + 1];
+        b += line[enter + 2];
+        a += line[enter + 3];
+      }
+      if (leave >= 0) {
+        r -= line[leave];
+        g -= line[leave + 1];
+        b -= line[leave + 2];
+        a -= line[leave + 3];
+      }
     }
   }
+}
+
+/** The box holding everything in `pixels` that isn't clear, `margin` pixels wider each way; null if all is clear. */
+function inkedBox({ data, width, height }: ImageData, margin: number) {
+  let [left, top, right, bottom] = [width, height, -1, -1];
+  for (let y = 0; y < height; y++) {
+    const row = y * width * 4 + 3;
+    let first = 0;
+    while (first < width && data[row + first * 4] === 0) first++;
+    if (first === width) continue;
+    let last = width - 1;
+    while (data[row + last * 4] === 0) last--;
+    left = Math.min(left, first);
+    right = Math.max(right, last);
+    top = Math.min(top, y);
+    bottom = y;
+  }
+  if (right < 0) return null;
+  const x = Math.max(0, left - margin);
+  const y = Math.max(0, top - margin);
+  return {
+    x,
+    y,
+    w: Math.min(width, right + margin + 1) - x,
+    h: Math.min(height, bottom + margin + 1) - y,
+  };
+}
+
+/** How far a blur of `sigma` pixels over a `width`×`height` canvas is shrunk, so it is a few pixels wide: the smaller size, and the blur left to do there. */
+function shrunk(width: number, height: number, sigma: number) {
+  const shrink = Math.max(1, sigma / 4);
+  return {
+    w: Math.max(1, Math.ceil(width / shrink)),
+    h: Math.max(1, Math.ceil(height / shrink)),
+    sigma: sigma / shrink,
+  };
+}
+
+/** Softens what `ctx` holds like CSS `blur(sigma px)`: three box passes each way, over no more than the blur can reach. */
+function soften(ctx: Context, sigma: number) {
+  const { width: w, height: h } = ctx.canvas;
+  const radius = Math.max(1, Math.round((Math.sqrt(4 * sigma ** 2 + 1) - 1) / 2));
+  const pixels = ctx.getImageData(0, 0, w, h);
+  const box = inkedBox(pixels, radius * 3);
+  if (!box) return;
+  const data = new Float32Array(box.w * box.h * 4);
+  for (let y = 0; y < box.h; y++) {
+    let from = ((box.y + y) * w + box.x) * 4;
+    for (let i = y * box.w * 4; i < (y + 1) * box.w * 4; i += 4, from += 4) {
+      const alpha = pixels.data[from + 3] / 255;
+      data[i] = pixels.data[from] * alpha;
+      data[i + 1] = pixels.data[from + 1] * alpha;
+      data[i + 2] = pixels.data[from + 2] * alpha;
+      data[i + 3] = pixels.data[from + 3];
+    }
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    blurLines(data, { count: box.h, length: box.w, stride: box.w, step: 1 }, radius);
+    blurLines(data, { count: box.w, length: box.h, stride: 1, step: box.w }, radius);
+  }
+  for (let y = 0; y < box.h; y++) {
+    let to = ((box.y + y) * w + box.x) * 4;
+    for (let i = y * box.w * 4; i < (y + 1) * box.w * 4; i += 4, to += 4) {
+      const alpha = data[i + 3];
+      pixels.data[to] = alpha > 0 ? (data[i] * 255) / alpha : 0;
+      pixels.data[to + 1] = alpha > 0 ? (data[i + 1] * 255) / alpha : 0;
+      pixels.data[to + 2] = alpha > 0 ? (data[i + 2] * 255) / alpha : 0;
+      pixels.data[to + 3] = alpha;
+    }
+  }
+  ctx.putImageData(pixels, 0, 0);
 }
 
 /**
  * `source` softened like CSS `blur(sigma px)`, on a canvas of its own. Done by hand because WebKit's
  * canvas has no `filter`, so the app's webview would leave every edge hard: shrunk so the blur is a
- * few pixels wide, three box passes each way, and smoothed back up.
+ * few pixels wide, blurred there, and smoothed back up.
  */
 export function blurred(source: HTMLCanvasElement, sigma: number) {
   const { width, height } = source;
   const out = canvasOf(width, height);
   const o = out.getContext("2d");
-  const shrink = Math.max(1, sigma / 4);
-  const w = Math.max(1, Math.ceil(width / shrink));
-  const h = Math.max(1, Math.ceil(height / shrink));
-  const small = canvasOf(w, h);
-  const s = small.getContext("2d", { willReadFrequently: true });
+  const small = shrunk(width, height, sigma);
+  const canvas = canvasOf(small.w, small.h);
+  const s = canvas.getContext("2d", { willReadFrequently: true });
   if (!o || !s) return out;
   s.imageSmoothingQuality = "high";
-  s.drawImage(source, 0, 0, w, h);
-  const pixels = s.getImageData(0, 0, w, h);
-  const data = new Float32Array(pixels.data.length);
-  for (let i = 0; i < data.length; i += 4) {
-    const alpha = pixels.data[i + 3] / 255;
-    for (let c = 0; c < 3; c++) data[i + c] = pixels.data[i + c] * alpha;
-    data[i + 3] = pixels.data[i + 3];
-  }
-  const smallSigma = sigma / shrink;
-  const radius = Math.max(1, Math.round((Math.sqrt(4 * smallSigma ** 2 + 1) - 1) / 2));
-  for (let pass = 0; pass < 3; pass++) {
-    blurLines(data, { count: h, length: w, stride: w, step: 1 }, radius);
-    blurLines(data, { count: w, length: h, stride: 1, step: w }, radius);
-  }
-  for (let i = 0; i < data.length; i += 4) {
-    const alpha = data[i + 3];
-    for (let c = 0; c < 3; c++) pixels.data[i + c] = alpha > 0 ? (data[i + c] * 255) / alpha : 0;
-    pixels.data[i + 3] = alpha;
-  }
-  s.putImageData(pixels, 0, 0);
+  s.drawImage(source, 0, 0, small.w, small.h);
+  soften(s, small.sigma);
   o.imageSmoothingQuality = "high";
-  o.drawImage(small, 0, 0, width, height);
+  o.drawImage(canvas, 0, 0, width, height);
   return out;
 }
 
-/** Draws what `paint` draws (in the units of `transform`) onto `target`, blurred by `sigma` device pixels. */
+/**
+ * Draws what `paint` draws (in the units of `transform`) onto `target`, blurred by `sigma` device
+ * pixels. It is painted already shrunk, on a canvas kept in memory, so nothing is read back from
+ * the GPU.
+ */
 export function paintSoft(
   target: Context,
   transform: DOMMatrix,
   sigma: number,
   paint: (g: Context) => void
 ) {
-  const layer = canvasOf(target.canvas.width, target.canvas.height);
-  const g = layer.getContext("2d");
+  const { width, height } = target.canvas;
+  const small = shrunk(width, height, sigma);
+  const canvas = canvasOf(small.w, small.h);
+  const g = canvas.getContext("2d", { willReadFrequently: true });
   if (!g) return;
-  g.setTransform(transform);
+  g.setTransform(new DOMMatrix().scale(small.w / width, small.h / height).multiply(transform));
   paint(g);
+  soften(g, small.sigma);
   target.save();
   target.setTransform(1, 0, 0, 1, 0, 0);
-  target.drawImage(blurred(layer, sigma), 0, 0);
+  target.imageSmoothingQuality = "high";
+  target.drawImage(canvas, 0, 0, width, height);
   target.restore();
 }
 

@@ -99,11 +99,24 @@ impl Catalog {
             .collect()
     }
 
+    /// The list on disk, each station categorized again: a newer app may read
+    /// the tags differently than the one that saved it.
     fn load(&self) -> Option<Cached> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Saved {
+            fetched_at: DateTime<Utc>,
+            stations: Vec<Station>,
+        }
         let text = fs::read(&self.file).ok()?;
-        serde_json::from_slice(&text)
+        let mut saved: Saved = serde_json::from_slice(&text)
             .inspect_err(|error| log::warn!("Ignoring the cached stations: {error}"))
-            .ok()
+            .ok()?;
+        saved.stations.iter_mut().for_each(Station::categorize);
+        Some(Cached {
+            fetched_at: saved.fetched_at,
+            stations: Arc::new(saved.stations),
+        })
     }
 
     fn save(&self, cached: &Cached) -> Result<()> {
@@ -139,6 +152,7 @@ fn fetch(directory: &RadioBrowser) -> Result<Vec<Station>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::category::Category;
     use crate::station::station;
     use chrono::TimeZone;
 
@@ -168,6 +182,21 @@ mod tests {
         let (_dir, catalog) = catalog_with(now() - TimeDelta::hours(1));
         let stations = catalog.stations(&offline(), false, now()).unwrap();
         assert_eq!(stations[0].id, "a");
+    }
+
+    #[test]
+    fn categorizes_a_list_saved_before_stations_had_categories() {
+        let (_dir, catalog) = catalog_with(now());
+        let mut saved = station("a", 1);
+        saved.categories.clear();
+        catalog
+            .save(&Cached {
+                fetched_at: now(),
+                stations: Arc::new(vec![saved]),
+            })
+            .unwrap();
+        let stations = catalog.stations(&offline(), false, now()).unwrap();
+        assert_eq!(stations[0].categories, [Category::News]);
     }
 
     #[test]

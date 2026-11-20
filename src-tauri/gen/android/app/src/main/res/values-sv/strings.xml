@@ -1,0 +1,8 @@
+<resources>
+    <string name="playback_channel">Spelar</string>
+    <string name="playback_channel_description">Det radion spelar, med kontroller</string>
+    <string name="action_previous">Föregående station</string>
+    <string name="action_play">Spela</string>
+    <string name="action_stop">Stoppa</string>
+    <string name="action_next">Nästa station</string>
+</resources>

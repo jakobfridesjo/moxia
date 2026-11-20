@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod category;
 pub mod error;
 pub mod favicon;
 pub mod models;

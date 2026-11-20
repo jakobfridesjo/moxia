@@ -43,6 +43,14 @@ tauri-plugin-log = "2.10.1"
 chrono = { workspace = true, features = ["serde"] }
 radio-core = { path = "radio-core" }
 
+# The camera, to scan an invite's QR code: the plugin has no desktop side.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = "2.5"
+
+# The system's media controls: MPRIS on Linux (pure-Rust D-Bus), Now Playing on macOS, Windows' transport controls.
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+souvlaki = { version = "0.9", default-features = false, features = ["use_zbus"] }
+
 # Audio decoding and, later, speech recognition are far too slow unoptimized;
 # dependencies build optimized even in `mise desktop`.
 [profile.dev.package."*"]

@@ -118,26 +118,6 @@ void main() {
 const MO = `${COMMON}
 /** The stream's banks (39 points), the stone in it (10) and the fall (8), each closed. */
 const vec2 OUTLINES[57] = vec2[57](vec2(591,1155),vec2(581,1165),vec2(579,1185),vec2(551,1199),vec2(541,1215),vec2(556,1234),vec2(570,1245),vec2(528,1249),vec2(500,1256),vec2(479,1268),vec2(460,1288),vec2(456,1312),vec2(471,1331),vec2(488,1349),vec2(496,1368),vec2(462,1375),vec2(387,1386),vec2(312,1397),vec2(246,1412),vec2(181,1425),vec2(87,1443),vec2(-11,1473),vec2(-11,1605),vec2(298,1605),vec2(256,1537),vec2(246,1495),vec2(270,1462),vec2(307,1432),vec2(350,1420),vec2(406,1424),vec2(462,1435),vec2(509,1439),vec2(560,1435),vec2(593,1418),vec2(610,1382),vec2(619,1331),vec2(619,1270),vec2(614,1204),vec2(604,1155),vec2(540,1318),vec2(555,1306),vec2(590,1306),vec2(612,1320),vec2(604,1376),vec2(580,1386),vec2(560,1396),vec2(532,1394),vec2(526,1368),vec2(536,1340),vec2(608,85),vec2(652,85),vec2(648,300),vec2(641,450),vec2(636,560),vec2(600,560),vec2(606,450),vec2(612,300));
-/** The stream's course from the foot of the fall, past the stone and out to the bottom left. */
-const vec2 COURSE[10] = vec2[10](vec2(596,1160),vec2(560,1225),vec2(505,1280),vec2(485,1340),vec2(470,1395),vec2(400,1410),vec2(300,1428),vec2(180,1460),vec2(60,1500),vec2(-40,1550));
-/** Where \`p\` lies along the course (units downstream) and across it (units to its side). */
-vec2 onCourse(vec2 p) {
-  float best = 1e5, along = 0., across = 0., walked = 0.;
-  for (int i = 0; i < 9; i++) {
-    vec2 a = COURSE[i], b = COURSE[i + 1], ab = b - a;
-    float length_ = length(ab);
-    float h = clamp(dot(p - a, ab) / (length_ * length_), 0., 1.);
-    vec2 off = p - a - ab * h;
-    float d = length(off);
-    if (d < best) {
-      best = d;
-      along = walked + h * length_;
-      across = sign(ab.x * off.y - ab.y * off.x) * d;
-    }
-    walked += length_;
-  }
-  return vec2(along, across);
-}
 /** Whether \`p\` lies inside the outline of \`count\` points from \`first\` in \`OUTLINES\`. */
 bool inside(vec2 p, int first, int count) {
   bool c = false;
@@ -192,11 +172,6 @@ void main() {
     float midStream = smoothstep(8., 45., fromBank);
     lay(acc, vec3(.66, .66, .65), (.14 * (1. - midStream) + .04 + .05 * (fbm(p * .012) - .5)) * water);
     lay(acc, vec3(.99, .985, .975), .2 * midStream * water);
-    // Ripple lines in thin grey ink, moving with the current.
-    vec2 course = onCourse(p);
-    float ridge = 1. - abs(noise(vec2(course.x * .014 - u_time * .26, course.y * .065)) * 2. - 1.);
-    float r2 = ridge * ridge, r4 = r2 * r2;
-    lay(acc, vec3(.48, .48, .49), r4 * r4 * ridge * .22 * water);
   }
   // Light running down the fall, and spray where it breaks.
   if (p.x > 560. && p.y < 720.) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { useSelector } from "@tanstack/react-store";
 import type { CountryCode, Station } from "@/shared/api/commands.ts";
 import { environmentAtom, shadersAtom } from "@/shared/config/preferences.ts";
@@ -14,7 +14,7 @@ import {
 } from "@/features/player/model/subtitles.ts";
 import { inkIn, inkLeft, layOut, type Layout } from "@/pages/radio/lib/captions.ts";
 import {
-  captionAnchor,
+  captionBox,
   drawCaption,
   drawDrift,
   drawListener,
@@ -30,7 +30,13 @@ import { listenToAir } from "@/pages/radio/lib/air.ts";
 import { makeWeather, type Weather } from "@/pages/radio/lib/ink-weather.ts";
 import { lightOnce, makeNight, NIGHT_LOOK, type Night } from "@/pages/radio/lib/ink-night.ts";
 import { makeDay, type Day } from "@/pages/radio/lib/ink-day.ts";
-import { makeSky, weatherFor, type Sky, type SkyNow } from "@/pages/radio/lib/ink-sky.ts";
+import {
+  makeSky,
+  moonlight,
+  weatherFor,
+  type Sky,
+  type SkyNow,
+} from "@/pages/radio/lib/ink-sky.ts";
 import type { LocalSky } from "@/pages/radio/model/use-local-sky.ts";
 import { DAY_TONE } from "@/pages/radio/lib/ink-tone.ts";
 import { bloomer } from "@/pages/radio/lib/ink-bloom.ts";
@@ -60,14 +66,39 @@ interface InkSceneProps {
   sky: LocalSky;
   /** Something opaque lies over the painting, so what moves in it rests. */
   covered?: boolean;
+  /** The keys in the top corner: subtitles start clear of them. */
+  keys?: RefObject<HTMLElement | null>;
 }
 
 /** How long a scene takes to fade into the next, in ms, when it does not bloom. */
 const FADE_MS = 1300;
 /** How long a new place takes to soak through, and mist takes to blow past, in ms. */
 const BLOOM_MS = 2200;
-const GUST_MS = 1400;
+const GUST_MS = 2800;
+/** How far below the keys subtitles start, in CSS pixels. */
+const CAPTION_CLEAR = 24;
 const SILENT_TALK: Talk = { talking: false, voice: 0 };
+
+const ease = (t: number) => t * t * (3 - 2 * t);
+const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
+
+/** How far a change of station has washed the painting out, 0 to 1, `progress` of the way through: in over the first third, held a moment, then back. */
+const washOf = (progress: number) =>
+  ease(clamp01(progress / 0.35)) * (1 - ease(clamp01((progress - 0.5) / 0.5)));
+
+/** The paper, "r,g,b", laid over everything drawn so far at `alpha`: by day a wash, by night the dark. */
+function washOut(ctx: CanvasRenderingContext2D, gl: InkGL | null, paper: string, alpha: number) {
+  if (alpha <= 0.002) return;
+  if (gl?.ready) {
+    gl.fill(paper.split(",").map(Number) as [number, number, number], alpha);
+    return;
+  }
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = `rgba(${paper},${alpha})`;
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.restore();
+}
 
 function copyOf(source: HTMLCanvasElement) {
   const copy = document.createElement("canvas");
@@ -93,6 +124,7 @@ export function InkScene({
   move,
   sky,
   covered = false,
+  keys,
 }: InkSceneProps) {
   const night = useSelector(nightAtom);
   const environment = useSelector(environmentAtom);
@@ -157,10 +189,20 @@ export function InkScene({
     [shaders]
   );
   // The sky changes without repainting: the shaders read it each frame.
-  const skyNow = useRef<SkyNow>({ weather: weatherFor(region, null), glow: 0, night });
+  const skyNow = useRef<SkyNow>({
+    weather: weatherFor(region, null),
+    glow: 0,
+    night,
+    moon: sky.moon,
+  });
   useEffect(() => {
-    skyNow.current = { weather: weatherFor(region, sky.weather), glow: sky.glow, night };
-  }, [region, sky.weather, sky.glow, night]);
+    skyNow.current = {
+      weather: weatherFor(region, sky.weather),
+      glow: sky.glow,
+      night,
+      moon: sky.moon,
+    };
+  }, [region, sky.weather, sky.glow, sky.moon, night]);
   const overhead = useRef<Sky | null>(null);
   const toneNow = useRef(tone);
   const lastMove = useRef(move);
@@ -210,9 +252,11 @@ export function InkScene({
           gl && image
             ? makeWeather(region, image, leafSize(image), tone, gl, {
                 liveSmoke: Boolean(day?.erased),
+                windOf: () => skyNow.current.weather.wind,
               })
             : null;
-      lighting.current = gl && night && image ? makeNight(region, image, gl) : null;
+      lighting.current =
+        gl && night && image ? makeNight(region, image, gl, () => moonlight(skyNow.current)) : null;
       daylight.current = day;
       overhead.current = gl && environment ? makeSky(gl, readSky) : null;
       canvas.style.zIndex = "1";
@@ -327,11 +371,18 @@ export function InkScene({
     // Read once per resize, not every frame, which could force a layout.
     let width = element.clientWidth;
     let height = element.clientHeight;
+    const keysEnd = () =>
+      keys?.current
+        ? keys.current.getBoundingClientRect().bottom - element.getBoundingClientRect().top
+        : 0;
+    let captionTop = keysEnd() + CAPTION_CLEAR;
     const observer = new ResizeObserver(() => {
       width = element.clientWidth;
       height = element.clientHeight;
+      captionTop = keysEnd() + CAPTION_CLEAR;
     });
     observer.observe(element);
+    if (keys?.current) observer.observe(keys.current);
     const hearAir = listenToAir();
     const gl = gpuOf();
     let gust: { start: number; direction: 1 | -1 } | null = null;
@@ -343,7 +394,7 @@ export function InkScene({
     const layoutOf = (caption: Caption) => {
       const known = layouts.get(caption);
       if (known) return known;
-      const layout = layOut(caption.text);
+      const layout = layOut(caption.text, caption.readings);
       layouts.set(caption, layout);
       return layout;
     };
@@ -421,19 +472,22 @@ export function InkScene({
         lastGust = moved.id;
         gust = still ? null : { start: now, direction: moved.direction };
       }
+      daylight.current?.over(ctx, moment);
+      lighting.current?.over(ctx, moment);
       if (gust) {
         const progress = (now - gust.start) / GUST_MS;
         if (progress >= 1) gust = null;
-        else weather.current?.gust(ctx, progress, gust.direction);
+        else {
+          washOut(ctx, gl, tone.paper, 0.9 * washOf(progress));
+          weather.current?.gust(ctx, progress, gust.direction);
+        }
       }
-      daylight.current?.over(ctx, moment);
-      lighting.current?.over(ctx, moment);
       gl?.flush(ctx);
 
       const [a, , , d, e, f] = scene.transform;
       const bounds = {
         left: -e / a,
-        top: -f / d,
+        top: (captionTop * ratio - f) / d,
         right: (canvas.width - e) / a,
         bottom: (canvas.height - f) / d,
       };
@@ -442,12 +496,7 @@ export function InkScene({
         if (alpha <= 0) return;
         const layout = layoutOf(caption);
         const inks = still ? layout.cells.map(() => 1) : inkIn(caption, layout, now);
-        drawCaption(ctx, layout, inks, captionAnchor(scene.region), {
-          alpha,
-          bounds,
-          time: still ? 0 : now / 1000,
-          tone,
-        });
+        drawCaption(ctx, layout, inks, captionBox(scene.region), { alpha, bounds, tone });
       });
 
       frame = requestAnimationFrame(draw);

@@ -50,7 +50,7 @@ describe("subtitles", () => {
     await screen.getByRole("button", { name: "Turn subtitles on" }).click();
     await expect
       .poll(() => callsTo(calls, "set_subtitles"))
-      .toEqual([{ enabled: true, script: "simplified" }]);
+      .toEqual([{ enabled: true, script: "simplified", reading: "none" }]);
     const seal = screen.getByRole("button", { name: "Turn subtitles off" });
     await expect.element(seal).toHaveAttribute("aria-pressed", "true");
 
@@ -66,6 +66,7 @@ describe("subtitles", () => {
         text: "各位听众早上好",
         duration: 2,
         said: [0, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8],
+        readings: [],
         emotion: "happy",
         emotionSure: 0.8,
         burst: null,
@@ -79,8 +80,8 @@ describe("subtitles", () => {
     await expect
       .poll(() => callsTo(calls, "set_subtitles"))
       .toEqual([
-        { enabled: true, script: "simplified" },
-        { enabled: false, script: "simplified" },
+        { enabled: true, script: "simplified", reading: "none" },
+        { enabled: false, script: "simplified", reading: "none" },
       ]);
     expect(captionsAtom.get()).toEqual([]);
   });

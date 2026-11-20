@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   chineseNumerals,
+  inscribedRuns,
   lunarDate,
   splitFrequency,
-  stationInitial,
   timeOfDay,
   titleSize,
 } from "@/pages/radio/lib/inscription.ts";
@@ -18,12 +18,6 @@ describe("inscription", () => {
     expect(splitFrequency("中国之声")).toEqual({ title: "中国之声", band: null, frequency: null });
     // A name that is nothing but a frequency keeps it.
     expect(splitFrequency("FM99.7").title).toBe("FM99.7");
-  });
-
-  it("takes a station's first Chinese character for its preset key", () => {
-    expect(stationInitial("澳門電台 FM100.7")).toBe("澳");
-    expect(stationInitial("RTHK 香港電台第一台")).toBe("香");
-    expect(stationInitial("Radio Free Asia")).toBeNull();
   });
 
   it("writes numbers in Chinese numerals", () => {
@@ -45,7 +39,16 @@ describe("inscription", () => {
     expect(timeOfDay(2)).toBe("night");
   });
 
-  it("only shrinks a title too long for two columns", () => {
-    expect(titleSize("中国之声")).toBe("clamp(1.2rem, calc(110svh / 4.00), 1.9rem)");
+  it("shrinks a title to one column, then sets it smaller in two", () => {
+    expect(titleSize("中国之声")).toBe(
+      "clamp(1.2rem, calc(110svh / 4.00), min(1.9rem, max(1.5rem, 55svh / 4.00)))"
+    );
+  });
+
+  it("sets ASCII brackets in the forms that turn with a vertical line", () => {
+    expect(inscribedRuns("91.5 HIT FM MACAU (成都)")).toEqual([
+      { text: "91.5 HIT FM MACAU", set: "sideways" },
+      { text: "（成都）", set: "characters" },
+    ]);
   });
 });

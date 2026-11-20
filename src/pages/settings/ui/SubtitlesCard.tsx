@@ -1,4 +1,4 @@
-import { SCRIPTS } from "@/shared/api/commands.ts";
+import { READINGS, SCRIPTS } from "@/shared/api/commands.ts";
 import { SCRIPT_NAMES, useMessages } from "@/shared/i18n/messages.ts";
 import {
   Card,
@@ -55,6 +55,21 @@ export function SubtitlesCard() {
           {SCRIPTS.map((script) => (
             <ToggleGroupItem key={script} value={script} className="px-3">
               <span lang={SCRIPT_NAMES[script].lang}>{SCRIPT_NAMES[script].name}</span>
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <ToggleGroup
+          aria-label={m.subtitles.reading}
+          variant="outline"
+          value={[subtitles.reading]}
+          onValueChange={(next) => {
+            const chosen = READINGS.find((reading) => reading === next[0]);
+            if (chosen) subtitles.setReading(chosen);
+          }}
+        >
+          {READINGS.map((reading) => (
+            <ToggleGroupItem key={reading} value={reading} className="px-3">
+              {m.subtitles.readings[reading]}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>

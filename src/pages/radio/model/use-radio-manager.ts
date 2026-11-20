@@ -3,12 +3,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSelector } from "@tanstack/react-store";
 import { commandErrorMessage, commands, type Station, type Tape } from "@/shared/api/commands.ts";
 import { modelsQuery, stationsQuery, tapesQuery } from "@/shared/api/queries.ts";
-import { subtitlesAtom } from "@/shared/config/preferences.ts";
+import { categoryAtom, subtitlesAtom, type CategoryFilter } from "@/shared/config/preferences.ts";
 import { useMessages } from "@/shared/i18n/messages.ts";
 import { formatTapeTime } from "@/shared/lib/duration.ts";
 import { toastError } from "@/shared/lib/toast.ts";
 import { useNow } from "@/shared/lib/use-now.ts";
-import { dialOrder, nextCountry } from "@/pages/radio/model/station-order.ts";
+import {
+  dialOrder,
+  inCategory,
+  nextCountry,
+  seekStation,
+} from "@/pages/radio/model/station-order.ts";
 import {
   deckPosition,
   loadTape,
@@ -34,6 +39,11 @@ export function useRadioManager() {
   const player = useSelector(playerAtom);
   const stations = useQuery(stationsQuery());
   const order = useMemo(() => dialOrder(stations.data ?? []), [stations.data]);
+  const category = useSelector(categoryAtom);
+  const dial = useMemo(
+    () => order.filter((station) => inCategory(station, category)),
+    [order, category]
+  );
   const tapes = useTapes().data ?? [];
   const presets = usePresets();
   const playStation = usePlayStation();
@@ -64,9 +74,9 @@ export function useRadioManager() {
     if (player.source === "station" && player.station) lastLive.current = player.station;
   }, [player.source, player.station]);
 
-  // Before anything plays, the radio shows the first preset, or else the first station.
+  // Before anything plays, the radio shows the first preset, or else the first station of the category.
   const firstPreset = presets.slots.find((slot) => slot.station)?.station ?? null;
-  const station = player.station ?? firstPreset ?? order[0] ?? null;
+  const station = player.station ?? firstPreset ?? dial[0] ?? order[0] ?? null;
   const tape = (mode === "playback" || mode === "paused") && deck ? deck.tape : null;
 
   const remove = useMutation({
@@ -89,6 +99,8 @@ export function useRadioManager() {
     recording: recording !== null,
     nowPlaying: player.nowPlaying,
     connecting: player.status === "connecting" || player.status === "buffering",
+    /** The station dropped, and is being tried again behind the mist. */
+    reconnecting: player.status === "reconnecting",
     error: player.error,
     recordingTime: recording ? formatTapeTime((now - recording.since) / 1000) : null,
     tapePosition: deck ? deckPosition(deck, now) : 0,
@@ -98,6 +110,7 @@ export function useRadioManager() {
     subtitles,
     /** Whether the speech models are on this device, so subtitles can be turned on here. */
     subtitlesReady,
+    category,
 
     /** Steps to the next or previous station, or recording while one plays. */
     seek: (step: -1 | 1) => {
@@ -106,13 +119,20 @@ export function useRadioManager() {
         if (next) playRecording(next);
         return;
       }
-      const next = stepThrough(order, player.station ?? station, step);
+      const next = seekStation(order, player.station ?? station, step, category);
       if (next) void playStation(next);
     },
 
-    /** Jumps to the next or previous country's stations, and so to its painting. */
+    /** Narrows seeking to one category; what plays stays on until the next seek. */
+    pickCategory: (picked: CategoryFilter) => {
+      categoryAtom.set(picked);
+      const count = order.filter((each) => inCategory(each, picked)).length;
+      setHint(m.radio.categoryPicked(m.radio.categories[picked], count));
+    },
+
+    /** Jumps to the next or previous country with stations in the category, and so to its painting. */
     changeScene: (step: -1 | 1) => {
-      const next = nextCountry(order, player.station ?? station, step);
+      const next = nextCountry(dial, player.station ?? station, step);
       if (next) void playStation(next);
     },
 

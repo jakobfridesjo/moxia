@@ -3,7 +3,10 @@ import { useMessages } from "@/shared/i18n/messages.ts";
 import { stationClock } from "@/shared/lib/station-time.ts";
 import {
   chineseNumerals,
+  inscribedRuns,
   lunarDate,
+  SIDEWAYS_ROOM_EM,
+  SIDEWAYS_SIZE_EM,
   splitFrequency,
   timeOfDay,
   TITLE_COLUMN_SVH,
@@ -41,24 +44,28 @@ export function Inscription({
       : null;
 
   return (
-    <div
-      aria-hidden
-      lang={simplified ? "zh-Hans" : "zh-Hant"}
-      className="pointer-events-none absolute top-[max(1.4rem,env(safe-area-inset-top))] right-[max(1.6rem,env(safe-area-inset-right))] isolate flex flex-row-reverse items-start gap-2.5 font-brush text-ink"
-    >
-      <Mist />
-      <div className="flex flex-col items-center gap-2">
-        {station && <SealMark glyph={inscription.regions[station.countryCode]} carved size={30} />}
-        <p
-          className="m-0 leading-[1.15] font-bold tracking-[0.04em] [writing-mode:vertical-rl]"
-          style={{ fontSize: titleSize(name), maxHeight: `${TITLE_COLUMN_SVH}svh` }}
-        >
-          <Inscribed text={name} />
-        </p>
+    <>
+      <MistFilter />
+      <div
+        aria-hidden
+        lang={simplified ? "zh-Hans" : "zh-Hant"}
+        className="pointer-events-none absolute top-[max(1.4rem,env(safe-area-inset-top))] right-[max(1.6rem,env(safe-area-inset-right))] -mt-12 -mr-12 flex flex-row-reverse items-start gap-2.5 p-12 font-brush text-ink [filter:url(#inscription-mist)] dark:[filter:none]"
+      >
+        <div className="flex flex-col items-center gap-2">
+          {station && (
+            <SealMark glyph={inscription.regions[station.countryCode]} carved size={38} />
+          )}
+          <p
+            className="m-0 leading-[1.15] font-bold tracking-[0.04em] [writing-mode:vertical-rl]"
+            style={{ fontSize: titleSize(name), maxHeight: `${TITLE_COLUMN_SVH}svh` }}
+          >
+            <Inscribed text={name} />
+          </p>
+        </div>
+        {tuning && <p className={SMALL_COLUMN}>{tuning}</p>}
+        {recording && <p className={SMALL_COLUMN}>{recording}</p>}
       </div>
-      {tuning && <p className={SMALL_COLUMN}>{tuning}</p>}
-      {recording && <p className={SMALL_COLUMN}>{recording}</p>}
-    </div>
+    </>
   );
 }
 
@@ -66,60 +73,77 @@ const SMALL_COLUMN =
   "m-0 mt-12 max-h-[62svh] text-[1.05rem] leading-[1.35] font-bold tracking-[0.04em] whitespace-nowrap text-ink/85 [writing-mode:vertical-rl]";
 
 /**
- * Paper cleared behind the inscription: a wash shaped to the columns with a torn, feathered edge,
- * so it fades into the brushwork instead of reading as a hole in the painting. At night the pale
- * writing reads on the dark painting as it is, and a wash would only show as a patch.
+ * Paper cleared behind the inscription, grown out of the writing itself: the strokes spread into one
+ * wash per column, torn and feathered at the edge, so it follows the columns however they wrap and fades
+ * into the brushwork instead of sitting on it as a slab. The padding around the writing is its room.
+ * At night the pale writing reads on the dark painting as it is, and a wash would only show as a patch.
  */
-function Mist() {
+function MistFilter() {
   return (
-    <svg
-      aria-hidden
-      className="absolute -top-14 -left-12 -z-10 h-[calc(100%+7rem)] dark:hidden w-[calc(100%+6rem)] overflow-visible"
-    >
-      <filter id="inscription-mist" x="-20%" y="-20%" width="140%" height="140%">
+    <svg aria-hidden width="0" height="0" className="absolute">
+      <filter id="inscription-mist" colorInterpolationFilters="sRGB">
+        <feGaussianBlur in="SourceAlpha" stdDeviation={12} result="spread" />
+        <feComponentTransfer in="spread" result="column">
+          <feFuncA type="linear" slope={6} />
+        </feComponentTransfer>
         <feTurbulence
           type="fractalNoise"
-          baseFrequency={0.035}
+          baseFrequency={0.03}
           numOctaves={3}
           seed={4}
           result="noise"
         />
         <feDisplacementMap
-          in="SourceGraphic"
+          in="column"
           in2="noise"
-          scale={34}
+          scale={28}
           xChannelSelector="R"
           yChannelSelector="G"
           result="torn"
         />
-        <feGaussianBlur in="torn" stdDeviation={11} />
+        <feGaussianBlur in="torn" stdDeviation={8} result="feathered" />
+        <feFlood style={{ floodColor: "var(--paper)" }} floodOpacity={0.9} />
+        <feComposite in2="feathered" operator="in" result="mist" />
+        <feMerge>
+          <feMergeNode in="mist" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
       </filter>
-      <rect
-        x="12%"
-        y="10%"
-        width="76%"
-        height="80%"
-        rx={18}
-        filter="url(#inscription-mist)"
-        className="fill-paper opacity-88"
-      />
     </svg>
   );
 }
 
-/** Characters as they are, with runs of Latin set a size down so they don't outweigh them. */
+/** The name with its numbers and Latin set the way vertical Chinese sets them, never broken across columns. */
 function Inscribed({ text }: { text: string }) {
-  const runs = text.match(/[A-Za-z0-9.&'+-]+(?:\s+[A-Za-z0-9.&'+-]+)*|[^A-Za-z0-9.&'+-]+/g) ?? [];
   let offset = 0;
-  return runs.map((run) => {
+  const room = `${SIDEWAYS_ROOM_EM / SIDEWAYS_SIZE_EM}em`;
+  const runs = inscribedRuns(text);
+  return runs.map(({ text: run, set }, index) => {
     const key = offset;
     offset += run.length;
-    return /[A-Za-z]/.test(run) ? (
-      <span key={key} className="text-[0.7em] tracking-[0.04em]">
+    if (set === "characters") return run;
+    const first = index === 0;
+    const last = index === runs.length - 1;
+    return (
+      <span
+        key={key}
+        className={
+          set === "across"
+            ? "whitespace-nowrap [text-combine-upright:all]"
+            : "whitespace-nowrap tracking-[0.04em]"
+        }
+        style={
+          set === "sideways"
+            ? {
+                fontSize: `${SIDEWAYS_SIZE_EM}em`,
+                marginInlineStart: first ? 0 : room,
+                marginInlineEnd: last ? 0 : room,
+              }
+            : undefined
+        }
+      >
         {run}
       </span>
-    ) : (
-      run.replace(/\s+/g, "")
     );
   });
 }

@@ -1,10 +1,9 @@
 import { memo, useId } from "react";
 import { useMessages } from "@/shared/i18n/messages.ts";
 import { playKeyClick } from "@/shared/lib/key-sound.ts";
-import { stationInitial } from "@/pages/radio/lib/inscription.ts";
 import type { PresetSlot } from "@/pages/radio/model/preset-slots.ts";
 import { useHold } from "@/pages/radio/model/use-hold.ts";
-import { glyphFilter, inkFilter } from "@/pages/radio/lib/seal-ink.ts";
+import { glyphFilter, inkFilter, WASH_FILTER } from "@/pages/radio/lib/seal-ink.ts";
 import { BLEED } from "@/pages/radio/ui/Seal.tsx";
 
 const COLUMNS = 3;
@@ -16,14 +15,15 @@ const EDGE = 3.2;
 /** Every cell is cut from the same stone, so they share one wear. */
 const STONE = "六";
 
-type Ink = "carved" | "printed" | "faint";
+type Ink = "carved" | "printed" | "half";
 
 const inkOf = (slot: PresetSlot, onAirId: string | null): Ink =>
-  !slot.station ? "faint" : slot.station.id === onAirId ? "carved" : "printed";
+  !slot.station ? "half" : slot.station.id === onAirId ? "carved" : "printed";
 
 /**
- * The six presets as one seal cut into a 3 × 2 block, like a many-character name seal. A stored key
- * shows its station's first character; an empty one a faint numeral; the key on air is carved.
+ * The six presets as one seal cut into a 3 × 2 block, like a many-character name seal. Each cell is
+ * its formal numeral (壹貳參…): printed in full on a stored key, half translucent on an empty one, and
+ * carved on the key on air.
  * Each cell is a key: a press plays it, holding stores the station on air.
  */
 export function PresetBlock({
@@ -45,8 +45,7 @@ export function PresetBlock({
     slot,
     x: MARGIN + (index % COLUMNS) * CELL_WIDTH,
     y: MARGIN + Math.floor(index / COLUMNS) * CELL_HEIGHT,
-    glyph:
-      (slot.station && stationInitial(slot.station.name)) ?? m.radio.seals.presets[slot.key - 1],
+    glyph: m.radio.seals.presets[slot.key - 1],
     ink: inkOf(slot, onAirId),
   }));
 
@@ -121,8 +120,8 @@ function BlockSeal({
 
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 grid">
-      <svg {...box} className="col-start-1 row-start-1 dark:hidden">
-        <path d={outline} className="fill-paper opacity-55" />
+      <svg {...box} className="col-start-1 row-start-1 overflow-visible dark:hidden">
+        <path d={outline} filter={WASH_FILTER} className="fill-paper opacity-75" />
       </svg>
       <svg
         {...box}
@@ -157,9 +156,9 @@ function BlockSeal({
             ))}
           </g>
         </g>
-        {(["printed", "faint"] as const).map((ink) => (
+        {(["printed", "half"] as const).map((ink) => (
           // Faded after the wear, not before: the wear cuts back anything printed too light.
-          <g key={ink} opacity={ink === "faint" ? 0.35 : 1}>
+          <g key={ink} opacity={ink === "half" ? 0.5 : 1}>
             <g filter={glyphFilter(STONE)}>
               {cells.filter((cell) => cell.ink === ink).map((cell) => character(cell, "fill-seal"))}
             </g>

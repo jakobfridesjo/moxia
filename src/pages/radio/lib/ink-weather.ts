@@ -218,6 +218,10 @@ interface Sky {
   /** The mist's pattern, and the paper's for the veil, made once each. */
   patterns: Map<string, CanvasPattern>;
   time: number;
+  /** How hard the wind blows, 1 as each painting was painted: more falls, and faster sideways. */
+  gust: number;
+  /** Effect seconds weighed by the wind, which mist drifts by, so a change of wind never makes it jump. */
+  blown: number;
   tone: Tone;
   /** Draws the mist on the GPU, when there is WebGL2. */
   gl: InkGL | null;
@@ -243,6 +247,8 @@ interface FogOptions {
   parallax?: number;
   /** Paper instead of mist, for what closes over the painting once nothing plays. */
   paper?: boolean;
+  /** How far the clouds are blurred, in pixels of the 256 tile, at least: high for an even fog with no shapes in it. */
+  softness?: number;
 }
 
 /** Mist over `box`, faded at its edges, drawn on `ctx` (which draws in layer units). */
@@ -250,6 +256,7 @@ function fog(ctx: Context, sky: Sky, [x, y, w, h]: Box, options: FogOptions) {
   const { drift = [6, 0], grain, stretch = 1, edge = 0.3, side = 0.18, parallax, paper } = options;
   const color = paper ? sky.tone.paper : sky.tone.mist;
   const alpha = options.alpha * (paper ? 1 : sky.tone.mistAlpha);
+  const softness = Math.max(options.softness ?? 0, paper ? 0 : sky.tone.mistSoftness);
   const m = ctx.getTransform();
   const dw = w * m.a;
   const dh = h * m.d;
@@ -266,13 +273,13 @@ function fog(ctx: Context, sky: Sky, [x, y, w, h]: Box, options: FogOptions) {
   const tile = (grain * unit) / 256;
   const span = 256 * tile;
   const origin: Point = [
-    (sky.time * drift[0] * unit) % span,
+    (sky.blown * drift[0] * unit) % span,
     (sky.time * drift[1] * unit) % (span * stretch),
   ];
   if (sky.gl?.ready) {
     sky.gl.mist({
       rect: [dx, dy, dw, dh],
-      tile: fogTile(color, paper ? 0 : sky.tone.mistSoftness),
+      tile: fogTile(color, softness),
       scratch: [W, H],
       origin,
       cell: [tile, tile * stretch],
@@ -291,12 +298,12 @@ function fog(ctx: Context, sky: Sky, [x, y, w, h]: Box, options: FogOptions) {
   g.setTransform(1, 0, 0, 1, 0, 0);
   g.globalCompositeOperation = "source-over";
   g.clearRect(0, 0, W + 2, H + 2);
-  let pattern = sky.patterns.get(color);
+  const key = `${color}:${softness}`;
+  let pattern = sky.patterns.get(key);
   if (!pattern) {
-    pattern =
-      g.createPattern(fogTile(color, paper ? 0 : sky.tone.mistSoftness), "repeat") ?? undefined;
+    pattern = g.createPattern(fogTile(color, softness), "repeat") ?? undefined;
     if (!pattern) return;
-    sky.patterns.set(color, pattern);
+    sky.patterns.set(key, pattern);
   }
   pattern.setTransform(new DOMMatrix().translate(...origin).scale(tile, tile * stretch));
   g.fillStyle = pattern;
@@ -437,7 +444,7 @@ function fallers(
   const falling: Faller[] = [];
   let owed = 0;
   return (ctx: Context, air: Air, seconds: number, rate: number) => {
-    owed += seconds * rate;
+    owed += seconds * rate * sky.gust;
     const count = Math.floor(owed);
     owed %= 1;
     for (let n = 0; n < count; n++) {
@@ -462,7 +469,8 @@ function fallers(
         continue;
       }
       leaf.y += fall * leaf.pace * step;
-      leaf.x += (Math.sin(leaf.age * 1.7 + leaf.phase) * sway + wind) * step;
+      const blowing = wind * sky.gust + (Math.sign(wind) || 1) * (sky.gust - 1) * 25;
+      leaf.x += (Math.sin(leaf.age * 1.7 + leaf.phase) * sway + blowing) * step;
       leaf.angle += leaf.spin * step * Math.abs(Math.sin(leaf.age * 1.3 + leaf.phase));
       if (leaf.y < sky.view.top - 50 || leaf.y > sky.view.bottom + 50) continue;
       const w = (leaf.sprite.width / sky.ratio) * size;
@@ -727,7 +735,7 @@ const EFFECTS: Record<WeatherPlace, (sky: Sky) => Effect[]> = {
       [1, 0.235, 0.45, -0.7, 0.24, false, 364],
       [0, 0.785, 0.55, 0.5, 0.18, true, 156],
     ];
-    const hull: Area = [0.02, 0.664, 0.41, 0.703];
+    const hull: Area = [0.02, 0.664, 0.41, 0.696];
     return [
       {
         draw: (ctx, air, seconds) => {
@@ -890,6 +898,7 @@ const EFFECTS: Record<WeatherPlace, (sky: Sky) => Effect[]> = {
             const catkin = catkins[i];
             catkin.x -= speed * seconds * (0.7 + catkin.size * 0.08);
             catkin.y += (Math.sin(sky.time * 0.9 + catkin.phase) * 16 + 4) * seconds;
+            catkin.x += (sky.gust - 1) * 20 * seconds;
             if (catkin.x < sky.view.left - 26) {
               catkins.splice(i, 1);
               continue;
@@ -1099,14 +1108,21 @@ export interface Weather {
   draw: (ctx: Context, air: Air, seconds: number, still: boolean) => void;
   /** The mist that rolls in over the whole painting, figures and all, once nothing plays. */
   veil: (ctx: Context, air: Air) => void;
-  /** A bank of mist blowing across the screen as the station changes, `progress` 0 to 1 of the way, toward `direction`. */
+  /** A bank of soft, even fog blowing across the screen as the station changes, `progress` 0 to 1 of the way, toward `direction`. */
   gust: (ctx: Context, progress: number, direction: 1 | -1) => void;
 }
+
+/** The wind each painting was painted in, 0 to 1. */
+const PAINTED_WIND = 0.2;
+
+/** How much harder than painted `wind` (0 to 1, as Open-Meteo's at 50 km/h) blows: from 0.4 in a calm to 3.4 in a gale. */
+const gustOf = (wind: number) => 0.4 + 3 * clamp(wind);
 
 /**
  * The weather over `place`'s painting, cut from `image`, a layer `width`×`height` units, in
  * `tone`'s colours. With `gl`, the last mist each of `draw`, `veil` and `gust` lays may still
- * wait in it: flush `gl` onto the canvas before drawing anything else there.
+ * wait in it: flush `gl` onto the canvas before drawing anything else there. `windOf` says how
+ * hard the wind blows there now, 0 to 1.
  */
 export function makeWeather(
   place: WeatherPlace,
@@ -1114,7 +1130,10 @@ export function makeWeather(
   { width, height }: { width: number; height: number },
   tone: Tone = DAY_TONE,
   gl: InkGL | null = null,
-  { liveSmoke = false }: { liveSmoke?: boolean } = {}
+  {
+    liveSmoke = false,
+    windOf = () => PAINTED_WIND,
+  }: { liveSmoke?: boolean; windOf?: () => number } = {}
 ): Weather {
   const sky: Sky = {
     image,
@@ -1125,10 +1144,13 @@ export function makeWeather(
     scratch: canvasOf(1, 1),
     patterns: new Map(),
     time: 0,
+    gust: gustOf(windOf()),
+    blown: 0,
     tone,
     gl,
     batching: false,
   };
+  let lastTime = 0;
   const effects = EFFECTS[place](sky).filter((effect) => !(liveSmoke && effect.smoke));
   /** Runs `paint`, which draws only mist, letting its mist wait to be drawn in one go. */
   const mistOnly = (paint: () => void) => {
@@ -1154,6 +1176,10 @@ export function makeWeather(
     draw: (ctx, air, seconds, still) => {
       look(ctx);
       sky.time = still ? 0 : air.time;
+      // The wind changes every half hour or so; the mist and leaves take a few seconds to follow.
+      sky.gust += (gustOf(windOf()) - sky.gust) * Math.min(1, seconds * 0.4);
+      sky.blown += still ? 0 : Math.max(0, air.time - lastTime) * sky.gust;
+      lastTime = air.time;
       for (const effect of effects) {
         if (still && !effect.mist) continue;
         ctx.save();
@@ -1195,24 +1221,26 @@ export function makeWeather(
       look(ctx);
       const { left, top, right, bottom } = sky.view;
       const [w, h] = [right - left, bottom - top];
-      const bank = w * 1.5;
-      // Three layers, each a little behind the last, so the bank is dense and has depth as it passes.
+      const bank = w * 3;
+      // Broad, blurred layers a little behind each other, so it comes on as an even, soft fog with no clouds in it.
       mistOnly(() => {
         for (const [lag, grain, alpha] of [
-          [0, 900, 1],
-          [0.08, 1400, 0.7],
-          [0.16, 520, 0.8],
+          [0, 2600, 1],
+          [0.06, 1800, 1],
+          [0.12, 3400, 0.9],
+          [0.18, 2200, 0.9],
         ]) {
           const p = clamp((progress - lag) / (1 - lag));
           if (p <= 0 || p >= 1) continue;
           const along = (w + bank) * (p * p * (3 - 2 * p));
           const x = direction > 0 ? left - bank + along : right - along;
-          fog(ctx, sky, [x, top - h * 0.1, bank, h * 1.2], {
-            drift: [direction * 60, -8],
+          fog(ctx, sky, [x, top - h * 0.2, bank, h * 1.4], {
+            drift: [direction * 40, -5],
             grain,
-            alpha: alpha * Math.sin(Math.PI * p),
-            edge: 0.12,
-            side: 0.32,
+            alpha: alpha * Math.min(1, 1.6 * Math.sin(Math.PI * p)),
+            edge: 0.2,
+            side: 0.4,
+            softness: 24,
           });
         }
       });

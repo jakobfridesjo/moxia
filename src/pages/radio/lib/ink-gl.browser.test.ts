@@ -209,6 +209,7 @@ describe("the day on the GPU", () => {
     weather: weatherFor(region, null),
     glow: 0,
     night: false,
+    moon: 1,
   });
 
   for (const region of ["TW", "MO", "HK"] as const)
@@ -251,7 +252,13 @@ describe("the day on the GPU", () => {
     const clear = { rain: 0, snow: 0, cloud: 0, fog: 0, wind: 0, storm: false };
     const skyWith = (sky: Partial<SkyNow>) => {
       const gl = gpu();
-      const overhead = makeSky(gl, () => ({ weather: clear, glow: 0, night: false, ...sky }));
+      const overhead = makeSky(gl, () => ({
+        weather: clear,
+        glow: 0,
+        night: false,
+        moon: 1,
+        ...sky,
+      }));
       return drawn(scene, (ctx) => {
         overhead?.draw(ctx, { scene, air: PLAYING, still: false });
         gl.flush(ctx);

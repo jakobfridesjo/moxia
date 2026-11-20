@@ -1,6 +1,6 @@
 import { createAtom, type Atom } from "@tanstack/react-store";
 import * as z from "zod/mini";
-import { SCRIPTS, type Script } from "@/shared/api/commands.ts";
+import { CATEGORIES, READINGS, SCRIPTS, type Reading, type Script } from "@/shared/api/commands.ts";
 import {
   persistedJson,
   persistedString,
@@ -49,8 +49,18 @@ export const shadersAtom = persistedSwitch("shaders", true);
 /** What subtitles are written in. */
 export const subtitleScriptAtom = persistedAtom<Script>("subtitleScript", SCRIPTS, "simplified");
 
+/** What is written small beside each character of a subtitle. */
+export const subtitleReadingAtom = persistedAtom<Reading>("subtitleReading", READINGS, "none");
+
 /** Whether stations are subtitled, once their models are downloaded. */
 export const subtitlesAtom = persistedSwitch("subtitles", false);
+
+/** What seeking steps through: every station, or one category's. */
+export const CATEGORY_FILTERS = ["all", ...CATEGORIES] as const;
+
+export type CategoryFilter = (typeof CATEGORY_FILTERS)[number];
+
+export const categoryAtom = persistedAtom<CategoryFilter>("category", CATEGORY_FILTERS, "all");
 
 /** The name this listener goes by when listening together. */
 export const listenerNameAtom = storedAtom(
@@ -79,5 +89,7 @@ export function resetPreferences() {
   shadersAtom.reset();
   subtitlesAtom.reset();
   subtitleScriptAtom.reset();
+  subtitleReadingAtom.reset();
   listenerNameAtom.reset();
+  categoryAtom.reset();
 }

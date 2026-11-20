@@ -215,10 +215,27 @@ fn stream_title(metadata: &[u8], legacy_encoding: &'static Encoding) -> Option<S
         Ok(text) => std::borrow::Cow::Borrowed(text),
         Err(_) => legacy_encoding.decode_without_bom_handling(&rest[..end]).0,
     };
-    let title = unescape_html(title.trim());
+    let title = match title.trim() {
+        markup if markup.starts_with('<') => unescape_html(&song_in_markup(markup)),
+        plain => unescape_html(plain),
+    };
     // Some servers fill an empty title in with a dash.
     let blank = title.chars().all(|c| c == '-' || c.is_whitespace());
     (!blank).then_some(title)
+}
+
+/// Some servers send their playout system's whole XML record as the title:
+/// `Artist - Song` from its first artist and title elements, empty when it has neither.
+fn song_in_markup(markup: &str) -> String {
+    let named = |word: &str| {
+        markup.split('<').find_map(|element| {
+            let (tag, text) = element.split_once('>')?;
+            let text = text.trim();
+            (tag.to_ascii_lowercase().contains(word) && !text.is_empty()).then_some(text)
+        })
+    };
+    let parts: Vec<_> = named("artist").into_iter().chain(named("title")).collect();
+    parts.join(" - ")
 }
 
 /// Some servers send the title HTML-escaped, Chinese as numeric references.
@@ -334,6 +351,26 @@ mod tests {
             stream_title(title, encoding_rs::GBK).as_deref(),
             Some("1766 Radio 百家 - Tom & Jerry & co")
         );
+    }
+
+    #[test]
+    fn takes_the_song_out_of_xml_titles() {
+        let title = "StreamTitle='<?xml version=\"1.0\" encoding=\"utf-8\"?><RadioInfo><Table>\
+            <DB_DALET_ARTIST_NAME>Sofia Hoffmann and Nitin Sawhney</DB_DALET_ARTIST_NAME>\
+            <DB_DALET_TITLE_NAME>Dolce Far Niente (Remix)</DB_DALET_TITLE_NAME>\
+            <DB_RADIO_NAME>Smooth FM</DB_RADIO_NAME></Table>\
+            <AnimadorInfo><TITLE>Sofia Morais</TITLE></AnimadorInfo></RadioInfo>';";
+        assert_eq!(
+            stream_title(title.as_bytes(), encoding_rs::GBK).as_deref(),
+            Some("Sofia Hoffmann and Nitin Sawhney - Dolce Far Niente (Remix)")
+        );
+        let only_title = b"StreamTitle='<Song><Title>Tom &amp; Jerry</Title></Song>';";
+        assert_eq!(
+            stream_title(only_title, encoding_rs::GBK).as_deref(),
+            Some("Tom & Jerry")
+        );
+        let neither = b"StreamTitle='<RadioInfo><DB_SONG_ID>0</DB_SONG_ID></RadioInfo>';";
+        assert_eq!(stream_title(neither, encoding_rs::GBK), None);
     }
 
     #[test]

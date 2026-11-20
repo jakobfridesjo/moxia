@@ -3,12 +3,16 @@ const DAY_TENS = ["初", "十", "廿", "三"];
 const DAY_ONES = "十一二三四五六七八九";
 const STATION_TIME_ZONE = "Asia/Shanghai";
 
-/** The title's largest and smallest size, in rem; it may run down two columns this tall. */
+/** The title's largest and smallest size, and its largest once it runs to a second column, in rem; it may run down two columns this tall. */
 const TITLE_LARGEST_REM = 1.9;
 const TITLE_SMALLEST_REM = 1.2;
+const TITLE_TWO_COLUMNS_REM = 1.5;
 export const TITLE_COLUMN_SVH = 55;
-/** Latin letters and digits lie on their side in a vertical line and take about this much of a character's height. */
-const SIDEWAYS_EM = 0.6;
+/** A Latin phrase lies on its side, set this size down, and each letter takes about this much of a character's height. */
+export const SIDEWAYS_SIZE_EM = 0.85;
+const SIDEWAYS_EM = 0.6 * SIDEWAYS_SIZE_EM;
+/** Room kept above and below a sideways phrase, in a character's height, so it never touches the characters. */
+export const SIDEWAYS_ROOM_EM = 0.25;
 
 export type Band = "FM" | "AM";
 
@@ -25,11 +29,6 @@ export function splitFrequency(name: string): {
     band: match[1].toUpperCase() as Band,
     frequency: match[2],
   };
-}
-
-/** The first Chinese character of a station's name, which its preset key shows; null for a name without one. */
-export function stationInitial(name: string) {
-  return /\p{Script=Han}/u.exec(name)?.[0] ?? null;
 }
 
 /** `100.7` as an inscriber writes it: 一〇〇點七. */
@@ -77,19 +76,82 @@ export function timeOfDay(hour: number): TimeOfDay {
   return "night";
 }
 
-/** How many characters tall `text` stands in a vertical line. */
-function columnLength(text: string) {
-  let length = 0;
-  for (const character of text) {
-    if (/\s/u.test(character)) length += 0.3;
-    else if (/[\p{Script=Han}　-ヿ＀-￯]/u.test(character)) length += 1;
-    else length += SIDEWAYS_EM;
-  }
-  return length;
+/**
+ * How a run of a vertical name is set, as in vertical Chinese typesetting: characters as they are, with a
+ * short acronym or a longer number among them in full-width letters standing one under another; a number
+ * of one or two digits across one character's square (縱中橫); and a Latin word or phrase on its side.
+ */
+export type InscribedSet = "characters" | "across" | "sideways";
+
+const LATIN_RUN = /[A-Za-z0-9.&'+-]+(?:\s+[A-Za-z0-9.&'+-]+)*/g;
+
+function latinSet(token: string): InscribedSet {
+  if (/^\d{1,2}\+?$/.test(token)) return "across";
+  if (/^\d+(?:\.\d+)?$/.test(token) || /^[A-Z]{1,4}$/.test(token)) return "characters";
+  return "sideways";
 }
 
-/** The title keeps one size and runs on into a second column; only a name too long for two shrinks. */
+/** `CCTV` as `ＣＣＴＶ`: Latin in the width of a character, so it stands upright in a vertical line. */
+function fullWidth(text: string) {
+  return text.replace(/[!-~]/g, (character) =>
+    String.fromCharCode(character.charCodeAt(0) + 0xfee0)
+  );
+}
+
+/** What lies between Latin runs: spaces dropped, and ASCII brackets and marks in the forms that turn with a vertical line. */
+function standing(text: string) {
+  return fullWidth(text.replace(/\s+/g, ""));
+}
+
+/** A name split into runs, each with how it is set in a vertical column. */
+export function inscribedRuns(text: string): { text: string; set: InscribedSet }[] {
+  const runs: { text: string; set: InscribedSet }[] = [];
+  const push = (part: string, set: InscribedSet) => {
+    if (!part) return;
+    const last = runs.at(-1);
+    if (last && last.set === set && set !== "across") last.text += part;
+    else runs.push({ text: part, set });
+  };
+  let at = 0;
+  for (const match of text.matchAll(LATIN_RUN)) {
+    push(standing(text.slice(at, match.index)), "characters");
+    const latin = match[0];
+    if (/\s/.test(latin)) push(latin, "sideways");
+    else
+      for (const part of latin.split(/(-)/)) {
+        const set = part === "-" ? "sideways" : latinSet(part);
+        push(set === "characters" ? fullWidth(part) : part, set);
+      }
+    at = match.index + latin.length;
+  }
+  push(standing(text.slice(at)), "characters");
+  return runs;
+}
+
+/** How many characters tall `text` stands in a vertical line. */
+function columnLength(text: string) {
+  const height: Record<InscribedSet, number> = {
+    characters: 1,
+    across: 0,
+    sideways: SIDEWAYS_EM,
+  };
+  return inscribedRuns(text).reduce(
+    (length, run) =>
+      length +
+      (run.set === "across" ? 1 : run.text.length * height[run.set]) +
+      (run.set === "sideways" ? 2 * SIDEWAYS_ROOM_EM : 0),
+    0
+  );
+}
+
+/**
+ * The title shrinks to stay in one column, down to the size it takes in two; past that it runs on
+ * into a second column, and only a name too long for two shrinks further.
+ */
 export function titleSize(text: string) {
-  const length = Math.max(columnLength(text), 1);
-  return `clamp(${TITLE_SMALLEST_REM}rem, calc(${2 * TITLE_COLUMN_SVH}svh / ${length.toFixed(2)}), ${TITLE_LARGEST_REM}rem)`;
+  const length = Math.max(columnLength(text), 1).toFixed(2);
+  const oneColumn = `${TITLE_COLUMN_SVH}svh / ${length}`;
+  const twoColumns = `${2 * TITLE_COLUMN_SVH}svh / ${length}`;
+  const largest = `min(${TITLE_LARGEST_REM}rem, max(${TITLE_TWO_COLUMNS_REM}rem, ${oneColumn}))`;
+  return `clamp(${TITLE_SMALLEST_REM}rem, calc(${twoColumns}), ${largest})`;
 }

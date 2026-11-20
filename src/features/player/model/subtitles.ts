@@ -4,10 +4,15 @@ import {
   commands,
   type Burst,
   type Emotion,
+  type Reading,
   type Script,
   type Sound,
 } from "@/shared/api/commands.ts";
-import { subtitleScriptAtom, subtitlesAtom } from "@/shared/config/preferences.ts";
+import {
+  subtitleReadingAtom,
+  subtitleScriptAtom,
+  subtitlesAtom,
+} from "@/shared/config/preferences.ts";
 import { currentMessages } from "@/shared/i18n/messages.ts";
 import { toastError } from "@/shared/lib/toast.ts";
 
@@ -23,6 +28,8 @@ export interface Caption {
   duration: number;
   /** When each character of `text` is said, in seconds after `at`. */
   said: number[];
+  /** How each character of `text` is read, in pinyin or zhuyin; "" for one not read. */
+  readings: string[];
   /** How the voice sounds, and how sure the model is of it, from 0 to 1. */
   emotion: Emotion;
   emotionSure: number;
@@ -64,7 +71,7 @@ export async function setSubtitles(on: boolean) {
   subtitlesStatusAtom.set(on ? "loading" : "off");
   if (!on) clearCaptions();
   try {
-    await commands.setSubtitles(on, subtitleScriptAtom.get());
+    await commands.setSubtitles(on, subtitleScriptAtom.get(), subtitleReadingAtom.get());
     if (mine === change) subtitlesStatusAtom.set(on ? "on" : "off");
   } catch (error) {
     if (mine !== change) return;
@@ -77,6 +84,12 @@ export async function setSubtitles(on: boolean) {
 /** Writes subtitles in `script` from now on, telling Rust at once while they are on. */
 export function setSubtitleScript(script: Script) {
   subtitleScriptAtom.set(script);
+  if (subtitlesAtom.get()) void setSubtitles(true);
+}
+
+/** Writes `reading` beside each character of subtitles from now on, telling Rust at once while they are on. */
+export function setSubtitleReading(reading: Reading) {
+  subtitleReadingAtom.set(reading);
   if (subtitlesAtom.get()) void setSubtitles(true);
 }
 

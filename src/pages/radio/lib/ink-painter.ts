@@ -16,6 +16,8 @@ const LEAF_HEIGHT = 1600;
 const TOP_FADE = 140;
 
 type Point = [number, number];
+/** Left, top, right and bottom. */
+type Box = [number, number, number, number];
 type Random = () => number;
 type Context = CanvasRenderingContext2D;
 
@@ -162,8 +164,8 @@ interface Leaf {
   crown: Point;
   /** Which way the listener looks: words leave his mouth (or crown) that way. */
   facing: 1 | -1;
-  /** Where subtitles go instead of beside his mouth: beside `beside` the way he faces, to clear what lies between, centred above his crown, for a figure with no room beside him, or in lines on the water, starting at `water` below what floats there and as wide as the screen allows, with their reflection beneath. */
-  caption?: "above" | { beside: Point } | { water: Point };
+  /** The box subtitles are written in. */
+  caption: Box;
   /** Where the scroll lies while the radio records. */
   hands: Point;
   /** A jaw inside the part, hinged near the ear, that drops as he speaks to show the dark of his mouth. */
@@ -219,6 +221,7 @@ export const LEAVES: Record<CountryCode, Leaf> = {
     turn: 0.07,
     crown: [614, 672],
     facing: -1,
+    caption: [135, 365, 790, 665],
     hands: [520, 1064],
     jaw: {
       part: [
@@ -291,7 +294,7 @@ export const LEAVES: Record<CountryCode, Leaf> = {
     turn: 0.07,
     crown: [470, 560],
     facing: -1,
-    caption: "above",
+    caption: [127, 220, 730, 597],
     hands: [420, 836],
   },
   // A boat poling home through the reeds on a misty river.
@@ -319,7 +322,7 @@ export const LEAVES: Record<CountryCode, Leaf> = {
     focus: 215,
     crown: [78, 1050],
     facing: 1,
-    caption: { water: [230, 1150] },
+    caption: [17, 220, 660, 590],
     hands: [96, 1078],
   },
   // An old scholar, hands folded, listening to a waterfall while his boy holds his staff.
@@ -343,8 +346,7 @@ export const LEAVES: Record<CountryCode, Leaf> = {
     turn: 0.07,
     crown: [249, 755],
     facing: 1,
-    // Clear of his robe, which flares out to his right.
-    caption: { beside: [285, 770] },
+    caption: [12, 394, 526, 739],
     hands: [262, 845],
     // His boy, who looks up to answer him.
     partner: {
@@ -552,44 +554,12 @@ function drawLeaf(ctx: Context, image: ImageBitmap) {
   ctx.drawImage(image, 0, 0, (image.width * LEAF_HEIGHT) / image.height, LEAF_HEIGHT);
 }
 
-/** Paper the size of the canvas: an even ground, mottled where it took up its size unevenly, with fibres and darker edges. */
+/** Paper the size of the canvas: an even ground, darker towards its edges. */
 function paper(ctx: Context) {
   const { width, height } = ctx.canvas;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = `rgb(${PAPER})`;
   ctx.fillRect(0, 0, width, height);
-  const random = seeded(3);
-  for (let i = 0; i < 40; i++) {
-    const x = random() * width;
-    const y = random() * height;
-    const radius = (0.05 + random() * 0.2) * Math.max(width, height);
-    const blot = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    blot.addColorStop(0, `rgba(120,105,85,${0.015 + random() * 0.025})`);
-    blot.addColorStop(1, "rgba(120,105,85,0)");
-    ctx.fillStyle = blot;
-    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-  }
-  const fibers = Math.round((width * height) / 3000);
-  ctx.lineWidth = 1;
-  for (let i = 0; i < fibers; i++) {
-    const x = random() * width;
-    const y = random() * height;
-    const angle = random() * Math.PI;
-    const length = 6 + random() * 40;
-    ctx.strokeStyle =
-      random() < 0.3
-        ? `rgba(255,255,255,${0.25 + random() * 0.3})`
-        : `rgba(130,115,90,${0.03 + random() * 0.05})`;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.quadraticCurveTo(
-      x + Math.cos(angle) * length * 0.5 + (random() - 0.5) * 8,
-      y + Math.sin(angle) * length * 0.5 + (random() - 0.5) * 8,
-      x + Math.cos(angle) * length,
-      y + Math.sin(angle) * length
-    );
-    ctx.stroke();
-  }
   const edge = ctx.createRadialGradient(
     width / 2,
     height * 0.45,
@@ -766,15 +736,6 @@ function scroll(ctx: Context, random: Random, time: number) {
   );
 }
 
-/** Where subtitles are written from in `region`'s leaf: the listener's mouth and the way he faces, above his crown, or on the water. */
-export function captionAnchor(region: CountryCode): CaptionAnchor {
-  const { caption, facing, jaw, crown } = LEAVES[region];
-  if (caption === "above") return { above: crown };
-  if (caption && "beside" in caption) return { at: caption.beside, facing };
-  if (caption) return caption;
-  return { at: jaw?.mouth ?? crown, facing };
-}
-
 /**
  * The moving parts of `scene`, on a context drawing in leaf units: each head held as `figures`
  * say, turned about its neck (a pitch of 1 lifts the chin as far as the leaf allows) and moved
@@ -868,82 +829,135 @@ export interface Bounds {
   bottom: number;
 }
 
-/** How subtitles are written, in leaf units: their size, how far beside the mouth or above the crown, how far above the mouth, and how far from the screen's edge. */
-const CAPTION = { size: 40, gap: 60, above: 40, lift: 170, margin: 30 } as const;
+/** Characters that close what came before, so a line never starts with one. */
+const CLOSING = /^[\p{Pe}\p{Pf}\p{Po}]$/u;
+
+/** Wraps cells as wide as `advances` into lines no wider than `width`, filling each before the next; a closing mark in `glyphs` stays on the line before it. Each line lists its cells' indices. */
+export function wrap(
+  advances: readonly number[],
+  glyphs: readonly string[],
+  width: number
+): number[][] {
+  const lines: number[][] = [];
+  let used = 0;
+  advances.forEach((advance, index) => {
+    const line = lines.at(-1);
+    if (line !== undefined && (used + advance <= width || CLOSING.test(glyphs[index] ?? ""))) {
+      line.push(index);
+      used += advance;
+    } else {
+      lines.push([index]);
+      used = advance;
+    }
+  });
+  return lines;
+}
+
+/** The size subtitles are written at, in leaf units. */
+const CAPTION_SIZE = 40;
 /** The blurs, as fractions of the glyph size, of the paper shadows laid behind a caption: a tight one for edges, wider ones for the glow. */
 const CAPTION_SHADOW = [0.15, 0.4, 0.8] as const;
 /** The width, as a fraction of the glyph size, of the paper stroke that thickens each glyph's halo so its glow spreads past the thin brush lines. */
 const CAPTION_HALO = 0.22;
-/** A reflection on the water: how strong it starts, the height of each rippling slice, and how far and fast they sway. */
-const REFLECTION = { ink: 0.32, slice: 3, sway: 2.5, ripples: 0.3, speed: 2.4 } as const;
+/** Readings, as fractions of a character's size: their size above a line and the room between their syllables. */
+const READING = { above: 0.45, apart: 0.5 } as const;
+const CAPTION_FONT = '"LXGW WenKai", "LXGW WenKai TC", serif';
 
-export type CaptionAnchor = { at: Point; facing: 1 | -1 } | { above: Point } | { water: Point };
+/** `reading`, written small above a character of size `size` whose middle is at `x`, with its top at `y`. */
+function writeReading(
+  ctx: Context,
+  reading: string,
+  [x, y]: [number, number],
+  size: number,
+  halo: boolean
+) {
+  ctx.save();
+  ctx.font = `700 ${size * READING.above}px ${CAPTION_FONT}`;
+  ctx.lineWidth = size * READING.above * 0.5;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  if (halo) ctx.strokeText(reading, x, y - size * 0.04);
+  ctx.fillText(reading, x, y - size * 0.04);
+  ctx.restore();
+}
+
+/** Where subtitles are written in `region`'s leaf, as left, top, right and bottom in leaf units. */
+export function captionBox(region: CountryCode): Box {
+  return LEAVES[region].caption;
+}
+
+/** How `layout` is set in a box `width` wide: each cell's advance, its lines, and the height of a line and of the room for readings above it. */
+function setCaption(ctx: Context, layout: Layout, width: number) {
+  const size = CAPTION_SIZE;
+  const read = layout.cells.some((cell) => cell.reading !== "");
+  const glyph = layout.chinese ? size : size * 0.7;
+  ctx.font = `700 ${size * READING.above}px ${CAPTION_FONT}`;
+  const readingWidths = layout.cells.map((cell) => ctx.measureText(cell.reading).width);
+  ctx.font = `700 ${glyph}px ${CAPTION_FONT}`;
+  const space = ctx.measureText(" ").width;
+  const advances = layout.cells.map((cell, index) => {
+    if (!layout.chinese) return ctx.measureText(cell.glyph).width + space;
+    // Each character is spaced so its own reading fits over it.
+    return read
+      ? Math.max(size * 1.1, (readingWidths[index] ?? 0) + size * READING.above * READING.apart)
+      : size * 1.05;
+  });
+  const lines = wrap(
+    advances,
+    layout.cells.map((cell) => cell.glyph),
+    width
+  );
+  const readings = read ? size * READING.above * 1.3 : 0;
+  const row = layout.chinese ? size * 1.3 + readings : glyph * 1.35;
+  return { glyph, advances, lines, row, readings };
+}
 
 /**
- * A subtitle written beside its speaker, the way he faces, centred above his
- * crown, or in lines on the water above its rippling reflection: each cell of
- * `layout` with as much ink as `inks` gives it, haloed in paper so the painting never runs
- * through them, kept within `bounds`, in `tone`'s writing. `time` (seconds) moves the ripples.
+ * A subtitle written in `box`, kept within `bounds`: from its top-left corner, line after line
+ * down it, starting again at the top once the box is full, each cell of `layout` with as much ink as `inks` gives it, haloed in paper so the
+ * painting never runs through them, in `tone`'s writing.
  */
 export function drawCaption(
   ctx: Context,
   layout: Layout,
   inks: readonly number[],
-  anchor: CaptionAnchor,
-  { alpha, bounds, time, tone }: { alpha: number; bounds: Bounds; time: number; tone: Tone }
+  box: Box,
+  { alpha, bounds, tone }: { alpha: number; bounds: Bounds; tone: Tone }
 ) {
-  const { size, gap, above, lift, margin } = CAPTION;
+  const left = Math.max(box[0], bounds.left);
+  const top = Math.max(box[1], bounds.top);
+  const right = Math.min(box[2], bounds.right);
+  const bottom = Math.min(box[3], bounds.bottom);
   ctx.save();
-  const latin = size * 0.7;
-  ctx.font = layout.vertical
-    ? `700 ${size}px "LXGW WenKai", "LXGW WenKai TC", serif`
-    : `700 ${latin}px "LXGW WenKai", serif`;
-  // On the water even Chinese runs in lines, as long as the screen is wide: a column's reflection would sink off the screen.
-  const inLines = "water" in anchor && layout.vertical;
-  const column = size * 1.3;
-  const advance = size * 1.05;
-  const row = layout.vertical ? size * 1.12 : latin * 1.35;
-  const perLine = Math.max(1, Math.floor((bounds.right - bounds.left - 2 * margin) / advance));
-  const lines = Math.ceil(layout.cells.length / perLine);
-  const width = inLines
-    ? Math.min(layout.cells.length, perLine) * advance
-    : layout.vertical
-      ? layout.columns * column
-      : Math.max(...layout.cells.map((cell) => ctx.measureText(cell.glyph).width));
-  const height = inLines ? lines * column : layout.rows * row;
-  const between = (value: number, low: number, high: number) =>
-    Math.min(Math.max(value, low), Math.max(low, high));
-  const [x, y] =
-    "water" in anchor
-      ? [anchor.water[0] - width / 2, anchor.water[1]]
-      : "above" in anchor
-        ? [anchor.above[0] - width / 2, anchor.above[1] - above - height]
-        : [
-            anchor.facing > 0 ? anchor.at[0] + gap : anchor.at[0] - gap - width,
-            anchor.at[1] - lift,
-          ];
-  const left = between(x, bounds.left + margin, bounds.right - margin - width);
-  // Writing on the water never climbs over what floats on it.
-  const top =
-    "water" in anchor
-      ? Math.max(y, bounds.top + margin)
-      : between(y, bounds.top + margin, bounds.bottom - margin - height);
+  const size = CAPTION_SIZE;
+  const { glyph, advances, lines, row, readings } = setCaption(ctx, layout, right - left);
+  const fit = Math.max(1, Math.floor((bottom - top) / row));
+  // Only the lines from the last time the box was started again show: the one being written in.
+  const writing = lines.findLastIndex((line) => line.some((index) => (inks[index] ?? 0) > 0));
+  const first = Math.floor(Math.max(0, writing) / fit) * fit;
+  const spots = new Map<number, [number, number]>();
+  lines.slice(first, first + fit).forEach((line, number) => {
+    let along = 0;
+    for (const index of line) {
+      const advance = advances[index] ?? 0;
+      const inset = layout.chinese ? (advance - size) / 2 : 0;
+      spots.set(index, [left + along + inset, top + readings + number * row]);
+      along += advance;
+    }
+  });
+  ctx.font = `700 ${glyph}px ${CAPTION_FONT}`;
   ctx.textBaseline = "top";
-  ctx.textAlign = layout.vertical && !inLines ? "center" : "left";
+  ctx.textAlign = "left";
   const write = (halo = false) => {
     const base = ctx.globalAlpha;
     layout.cells.forEach((cell, index) => {
       const ink = inks[index] ?? 0;
-      if (ink <= 0) return;
+      const spot = spots.get(index);
+      if (ink <= 0 || !spot) return;
       ctx.globalAlpha = base * ink;
-      const [cellX, cellY] = inLines
-        ? [left + (index % perLine) * advance, top + Math.floor(index / perLine) * column]
-        : [
-            layout.vertical ? left + width - column * (cell.column + 0.5) : left,
-            top + cell.row * row,
-          ];
-      if (halo) ctx.strokeText(cell.glyph, cellX, cellY);
-      ctx.fillText(cell.glyph, cellX, cellY);
+      if (halo) ctx.strokeText(cell.glyph, ...spot);
+      ctx.fillText(cell.glyph, ...spot);
+      if (cell.reading) writeReading(ctx, cell.reading, [spot[0] + size / 2, spot[1]], size, halo);
     });
     ctx.globalAlpha = base;
   };
@@ -963,22 +977,5 @@ export function drawCaption(
   ctx.restore();
   ctx.fillStyle = `rgba(${tone.writing},${0.92 * alpha})`;
   write();
-  if ("water" in anchor) {
-    // Mirrored about the surface in thin slices, each swaying on its own ripple, fading with depth.
-    const { ink, slice, sway, ripples, speed } = REFLECTION;
-    const surface = top + height;
-    for (let depth = 0; depth < height; depth += slice) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(left - margin, surface + depth, width + 2 * margin, slice + 0.5);
-      ctx.clip();
-      ctx.globalAlpha = ink * (1 - depth / height);
-      const shift = Math.sin(depth * ripples - time * speed) * sway * (1 + depth / height);
-      ctx.translate(shift, 2 * surface);
-      ctx.scale(1, -1);
-      write();
-      ctx.restore();
-    }
-  }
   ctx.restore();
 }

@@ -8,3 +8,6 @@ export const inkFilter = (glyph: string) => `url(#seal-ink-${stone(glyph)})`;
 
 /** The lighter worn filter for a seal's character, so it stays legible. */
 export const glyphFilter = (glyph: string) => `url(#seal-glyph-${stone(glyph)})`;
+
+/** The feathered paper wash under a seal, mounted by `SealInk`. */
+export const WASH_FILTER = "url(#seal-wash)";

@@ -1,10 +1,21 @@
 import { Channel, invoke as tauriInvoke, type InvokeArgs } from "@tauri-apps/api/core";
+import {
+  cancel,
+  checkPermissions,
+  Format,
+  requestPermissions,
+  scan,
+} from "@tauri-apps/plugin-barcode-scanner";
 
 // Mirrors the serde types in src-tauri (camelCase). Keep the two in step.
 
 /** The countries whose stations the app lists: mainland China, Taiwan, Hong Kong and Macau. */
 export const COUNTRY_CODES = ["CN", "TW", "HK", "MO"] as const;
 export type CountryCode = (typeof COUNTRY_CODES)[number];
+
+/** What kind of station it is, as Rust reads it out of radio-browser's tags and the name. */
+export const CATEGORIES = ["music", "news", "talk", "traffic", "fullService"] as const;
+type Category = (typeof CATEGORIES)[number];
 
 /** A radio-browser station. */
 export interface Station {
@@ -16,6 +27,8 @@ export interface Station {
   /** A remote URL: never load it in an `<img>`, ask `getFavicon` for it. */
   favicon: string | null;
   tags: string[];
+  /** Empty when the tags and the name say nothing. */
+  categories: Category[];
   countryCode: CountryCode;
   /** Province or region. */
   state: string | null;
@@ -51,12 +64,16 @@ export type PlayerEvent =
       text: string;
       duration: number;
       said: number[];
+      /** How each character of `text` is read, in pinyin or zhuyin; "" for one not read. */
+      readings: string[];
       emotion: Emotion;
       emotionSure: number;
       burst: Burst | null;
     }
   /** What plays from now on, while subtitles are on. */
   | { kind: "sound"; sound: Sound }
+  /** The station dropped after playing; Rust tries it again, the `attempt`th time, about a minute in all. */
+  | { kind: "reconnecting"; attempt: number }
   | { kind: "stopped" }
   | { kind: "error"; message: string };
 
@@ -98,6 +115,10 @@ export interface Tape {
  */
 export const SCRIPTS = ["simplified", "taiwan", "hongKong"] as const;
 export type Script = (typeof SCRIPTS)[number];
+
+/** What is written small beside each character of a subtitle: nothing, pinyin, or zhuyin (bopomofo). */
+export const READINGS = ["none", "pinyin", "zhuyin"] as const;
+export type Reading = (typeof READINGS)[number];
 
 /**
  * The models downloaded on request: `subtitles` transcribes what stations say, `translator` puts
@@ -161,6 +182,8 @@ export type CommandName =
   | "list_recent"
   | "get_favicon"
   | "local_weather"
+  | "watch_media"
+  | "show_media"
   | "play"
   | "stop"
   | "set_volume"
@@ -265,8 +288,8 @@ export const commands = {
    * writes them in `script`. Either applies to what plays at once; with subtitles on, a play
    * waits a few seconds longer before it starts, so speech is transcribed before it is heard.
    */
-  setSubtitles: (enabled: boolean, script: Script) =>
-    invoke<null>("set_subtitles", { enabled, script }),
+  setSubtitles: (enabled: boolean, script: Script, reading: Reading) =>
+    invoke<null>("set_subtitles", { enabled, script, reading }),
 
   /** Chinese text in English. The translator loads on the first call (a second or two). */
   translate: (text: string) => invoke<string>("translate", { text }),
@@ -295,6 +318,47 @@ export const commands = {
   tuneRoom: (station: Station) => invoke<null>("tune_room", { station }),
 
   leaveRoom: () => invoke<null>("leave_room"),
+};
+
+/** Only phones have the camera plugin; elsewhere invites are pasted. */
+export const canScan =
+  typeof navigator !== "undefined" && /Android|iPhone|iPad/i.test(navigator.userAgent);
+
+/** A button pressed on the system's media controls, or a media key. */
+export type MediaAction = "play" | "pause" | "toggle" | "next" | "previous" | "stop";
+
+/** What the system's media controls show: the station, or none, and what it says is on air. */
+export interface MediaNow {
+  title: string | null;
+  artist: string | null;
+  playing: boolean;
+}
+
+/**
+ * The system's media controls: the lock screen and notification on Android, the desktop's media
+ * menu and keys elsewhere. On Android they also keep the radio playing with the screen off.
+ */
+export const media = {
+  watch: (onAction: (action: MediaAction) => void) =>
+    invoke<null>("watch_media", { onAction: new Channel<MediaAction>(onAction) }),
+  show: (now: MediaNow) => invoke<null>("show_media", { now }),
+};
+
+/** The phone's camera, through Tauri's barcode scanner plugin. */
+export const camera = {
+  /**
+   * The text of the next QR code the back camera sees, or null when the camera is refused. The
+   * camera lies under the webview, which turns see-through until a code is read: hide all but a
+   * frame meanwhile. Rejects with "cancelled" on `cancelScan`.
+   */
+  scanQrCode: async () => {
+    let permission = await checkPermissions();
+    if (permission !== "granted") permission = await requestPermissions();
+    if (permission !== "granted") return null;
+    const { content } = await scan({ windowed: true, formats: [Format.QRCode] });
+    return content;
+  },
+  cancelScan: () => cancel(),
 };
 
 /** Rust rejects with its error's message as a plain string. */

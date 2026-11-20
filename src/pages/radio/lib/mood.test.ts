@@ -16,7 +16,16 @@ const SILENT = { talking: false, voice: 0 } as const;
 /** A line said from `at` ms, a character every quarter second. */
 function line(text: string, emotion: Emotion, emotionSure = 0.9, at = 0): Caption {
   const said = Array.from(text, (_, index) => index * 0.25);
-  return { text, duration: said.length * 0.25, said, at, emotion, emotionSure, burst: null };
+  return {
+    text,
+    duration: said.length * 0.25,
+    said,
+    readings: [],
+    at,
+    emotion,
+    emotionSure,
+    burst: null,
+  };
 }
 
 /** Poses frame by frame over `seconds`, from `from` ms, hearing what `hearing` says at each time. */

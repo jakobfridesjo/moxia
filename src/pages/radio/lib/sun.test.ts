@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeStation } from "@/shared/test/fixtures.ts";
-import { glowAt, isNightAt, placeOf, sunAltitude } from "@/pages/radio/lib/sun.ts";
+import { glowAt, isNightAt, moonLit, placeOf, sunAltitude } from "@/pages/radio/lib/sun.ts";
 
 const TAIPEI = [25.03, 121.56] as const;
 
@@ -27,11 +27,21 @@ describe("the light of the sun", () => {
   });
 });
 
+describe("moonLit", () => {
+  it("is full at a full moon and dark at a new one", () => {
+    // The new moon of 2024-01-11 and the full moon of 2024-01-25.
+    expect(moonLit(new Date("2024-01-11T11:57:00Z"))).toBeLessThan(0.02);
+    expect(moonLit(new Date("2024-01-25T17:54:00Z"))).toBeGreaterThan(0.98);
+  });
+});
+
 describe("placeOf", () => {
   it("uses the station's own place, else its region's city", () => {
     const station = makeStation({ countryCode: "TW", latitude: 22.6, longitude: 120.3 });
     expect(placeOf("TW", station)).toEqual([22.6, 120.3]);
     expect(placeOf("TW", makeStation({ countryCode: "TW" }))).toEqual(TAIPEI);
     expect(placeOf("HK", null)).toEqual([22.3, 114.17]);
+    expect(placeOf("CN", makeStation({ state: "Szechuan" }))).toEqual([30.57, 104.07]);
+    expect(placeOf("CN", makeStation({ state: null }))).toEqual([39.9, 116.4]);
   });
 });

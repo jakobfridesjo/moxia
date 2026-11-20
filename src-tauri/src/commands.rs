@@ -9,7 +9,7 @@ use radio_core::models::{DownloadProgress, Model, ModelStatus, Models};
 use radio_core::player::{Player, PlayerEvent};
 use radio_core::radio_browser::RadioBrowser;
 use radio_core::sky::{LocalWeather, Skies};
-use radio_core::speech::{Script, Speech};
+use radio_core::speech::{Reading, Script, Speech, Writing};
 use radio_core::station::Station;
 use radio_core::store::{Preset, Store};
 use radio_core::tapes::{Tape, Tapes};
@@ -17,6 +17,8 @@ use radio_core::together::{InviteCode, RoomEvent, Together};
 use radio_core::translation::Translator;
 use serde::{Serialize, Serializer};
 use tauri::ipc::Channel;
+
+use crate::media::{Media, MediaAction, MediaNow};
 use tauri::{AppHandle, Manager, State};
 
 /// Reaches the frontend as the rejected `invoke` promise's message.
@@ -53,6 +55,7 @@ pub struct AppState {
     /// Loaded on the first translation; a failure is not kept, so a download can follow it.
     translator: Mutex<Option<Arc<Translator>>>,
     together: Together,
+    pub media: Media,
 }
 
 impl AppState {
@@ -78,6 +81,7 @@ impl AppState {
             speech: Mutex::new(None),
             translator: Mutex::new(None),
             together: Together::default(),
+            media: Media::default(),
         }
     }
 
@@ -226,6 +230,21 @@ pub async fn play(
     .await
 }
 
+/// Sends the buttons pressed on the system's media controls, and media keys, to `on_action`.
+#[tauri::command]
+pub fn watch_media(state: State<'_, AppState>, on_action: Channel<MediaAction>) {
+    state.media.watch(on_action);
+}
+
+/// Shows what plays on the system's media controls.
+#[tauri::command]
+pub fn show_media(state: State<'_, AppState>, now: MediaNow) {
+    #[cfg(any(desktop, target_os = "android"))]
+    state.media.show(&now);
+    #[cfg(target_os = "ios")]
+    let _ = now;
+}
+
 /// The weather now at a station's place, as its painting shows it.
 #[tauri::command]
 pub async fn local_weather(
@@ -367,9 +386,14 @@ pub async fn delete_model(app: AppHandle, model: Model) -> CommandResult<()> {
 /// holds back more audio before it starts, so speech is transcribed before it
 /// is heard.
 #[tauri::command]
-pub async fn set_subtitles(app: AppHandle, enabled: bool, script: Script) -> CommandResult<()> {
+pub async fn set_subtitles(
+    app: AppHandle,
+    enabled: bool,
+    script: Script,
+    reading: Reading,
+) -> CommandResult<()> {
     blocking(app, move |state| {
-        state.player.set_script(script);
+        state.player.set_writing(Writing { script, reading });
         let mut speech = state.speech();
         if enabled && speech.is_none() {
             if !state.models.is_downloaded(Model::Subtitles) {

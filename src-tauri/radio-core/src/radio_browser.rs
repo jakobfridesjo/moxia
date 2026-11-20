@@ -164,13 +164,14 @@ fn station(api: ApiStation, country: Country) -> Option<Station> {
     }
     let codec = api.codec.trim();
     let place = coordinates(api.geo_lat, api.geo_long);
-    Some(Station {
+    let mut station = Station {
         id: api.stationuuid,
         name: name.to_owned(),
         stream_url,
         homepage: non_empty(api.homepage),
         favicon: non_empty(api.favicon),
         tags: list(&api.tags),
+        categories: Vec::new(),
         country_code: country,
         state: non_empty(api.state),
         latitude: place.map(|(latitude, _)| latitude),
@@ -181,7 +182,9 @@ fn station(api: ApiStation, country: Country) -> Option<Station> {
         hls: api.hls == 1,
         votes: api.votes,
         click_count: api.clickcount,
-    })
+    };
+    station.categorize();
+    Some(station)
 }
 
 /// A real place: many stations are filed at 0, 0 or out of range.
@@ -214,6 +217,7 @@ fn list(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::category::Category;
 
     #[test]
     fn reads_api_stations_and_drops_unplayable_ones() {
@@ -243,6 +247,7 @@ mod tests {
         assert_eq!(station.stream_url, "https://cdn.x/a.m3u8");
         assert_eq!(station.homepage, None);
         assert_eq!(station.tags, ["news", "新闻"]);
+        assert_eq!(station.categories, [Category::News]);
         assert_eq!(station.state.as_deref(), Some("北京"));
         assert_eq!(station.codec, None);
         assert_eq!(station.bitrate, None);

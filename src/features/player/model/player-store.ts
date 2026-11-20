@@ -12,7 +12,14 @@ import { currentMessages } from "@/shared/i18n/messages.ts";
 import { toastError } from "@/shared/lib/toast.ts";
 import { addCaption, clearCaptions, soundAtom } from "@/features/player/model/subtitles.ts";
 
-export type PlayerStatus = "idle" | "connecting" | "playing" | "buffering" | "stopped" | "error";
+export type PlayerStatus =
+  | "idle"
+  | "connecting"
+  | "playing"
+  | "buffering"
+  | "reconnecting"
+  | "stopped"
+  | "error";
 
 /**
  * The tape in the deck. It moves at `speed` tape seconds per second since
@@ -73,7 +80,12 @@ const recordingNow = () => playerAtom.get().recording !== null;
 
 /** Whether the player holds a stream open, so the main button stops it. */
 export function isActive(status: PlayerStatus) {
-  return status === "connecting" || status === "playing" || status === "buffering";
+  return (
+    status === "connecting" ||
+    status === "playing" ||
+    status === "buffering" ||
+    status === "reconnecting"
+  );
 }
 
 /** Where the deck's tape is at `now`, in seconds. */
@@ -106,6 +118,8 @@ export function applyPlayerEvent(
       };
     case "buffering":
       return { ...state, status: "buffering", deck: tape ? halt(state.deck, now) : state.deck };
+    case "reconnecting":
+      return { ...state, status: "reconnecting" };
     case "nowPlaying": {
       const title = event.title.trim() || null;
       const recording =

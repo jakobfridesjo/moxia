@@ -5,6 +5,7 @@
 
 mod dfsmn;
 mod fbank;
+mod reading;
 mod recognizer;
 mod resample;
 mod script;
@@ -20,6 +21,7 @@ use std::thread;
 use anyhow::{Context, Result};
 
 use fbank::{Fbank, Frame, RATE, SHIFT, Scratch, Window};
+pub use reading::Reading;
 pub use recognizer::{Burst, Emotion};
 use recognizer::{Recognizer, Transcript};
 use resample::Resampler;
@@ -103,6 +105,8 @@ pub struct Subtitle {
     pub text: String,
     /// When each character of `text` is said, in seconds into the session.
     pub said: Vec<f64>,
+    /// How each character of `text` is read, in pinyin or zhuyin; empty for one not read, or all when none are asked for.
+    pub readings: Vec<String>,
     pub emotion: Emotion,
     /// How sure SenseVoice is of `emotion`, from 0 to 1.
     pub emotion_sure: f32,
@@ -125,21 +129,38 @@ pub struct Heard {
     pub sounds: Vec<Sounding>,
 }
 
+/// How subtitles are written: in which script, and with which readings beside the characters.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Writing {
+    pub script: Script,
+    pub reading: Reading,
+}
+
 impl Subtitle {
-    /// This subtitle in `script`. Should converting change how many characters
-    /// there are, each takes the time of the one at its place in the original.
-    pub fn written_in(self, script: Script) -> Self {
-        let text = script.write(self.text);
+    /// This subtitle as `writing` asks, read from the simplified text SenseVoice wrote. Should
+    /// converting change how many characters there are, each takes the time and the reading of
+    /// the one at its place in the original.
+    pub fn written_in(self, writing: Writing) -> Self {
+        let readings = writing.reading.of(&self.text);
+        let text = writing.script.write(self.text);
         let length = text.chars().count();
-        let said = if length == self.said.len() {
-            self.said
-        } else {
-            (0..length)
-                .filter_map(|index| self.said.get(index * self.said.len() / length).copied())
-                .collect()
-        };
-        Self { text, said, ..self }
+        Self {
+            text,
+            said: spread(self.said, length),
+            readings: spread(readings, length),
+            ..self
+        }
     }
+}
+
+/// `items` stretched or squeezed to `length`, each taking the place of the one where it fell.
+fn spread<T: Clone>(items: Vec<T>, length: usize) -> Vec<T> {
+    if items.len() == length {
+        return items;
+    }
+    (0..length)
+        .filter_map(|index| items.get(index * items.len() / length).cloned())
+        .collect()
 }
 
 /// Turns one session's decoded audio into subtitles.
@@ -245,6 +266,7 @@ impl Subtitler {
                         end: run.origin + last as f64 / RATE as f64,
                         text: transcript.text,
                         said: transcript.said.iter().map(|at| start + at).collect(),
+                        readings: Vec::new(),
                         emotion: transcript.emotion,
                         emotion_sure: transcript.emotion_sure,
                         burst: Burst::of(&transcript.event),
@@ -265,5 +287,31 @@ impl Subtitler {
         run.audio.drain(..drop);
         run.audio_start += drop;
         Heard { subtitles, sounds }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_simplified_text_and_keeps_each_reading_by_its_character() {
+        let subtitle = Subtitle {
+            start: 0.0,
+            end: 1.0,
+            text: "这里".to_owned(),
+            said: vec![0.0, 0.5],
+            readings: Vec::new(),
+            emotion: Emotion::Neutral,
+            emotion_sure: 0.0,
+            burst: None,
+        };
+        let written = subtitle.written_in(Writing {
+            script: Script::Taiwan,
+            reading: Reading::Zhuyin,
+        });
+        assert_eq!(written.text, "這裡");
+        assert_eq!(written.readings, ["ㄓㄜˋ", "ㄌㄧˇ"]);
+        assert_eq!(written.said, [0.0, 0.5]);
     }
 }

@@ -53,7 +53,7 @@ describe("SubtitlesCard", () => {
     await expect.element(screen.getByText("On this device")).toBeVisible();
     await expect
       .poll(() => callsTo(calls, "set_subtitles"))
-      .toEqual([{ enabled: true, script: "simplified" }]);
+      .toEqual([{ enabled: true, script: "simplified", reading: "none" }]);
     await expect
       .element(screen.getByRole("button", { name: "On" }))
       .toHaveAttribute("aria-pressed", "true");
@@ -76,9 +76,29 @@ describe("SubtitlesCard", () => {
     await expect.element(hongKong).toHaveAttribute("aria-pressed", "true");
     await expect
       .poll(() => callsTo(calls, "set_subtitles"))
-      .toEqual([{ enabled: true, script: "hongKong" }]);
+      .toEqual([{ enabled: true, script: "hongKong", reading: "none" }]);
     expect(subtitleScriptAtom.get()).toBe("hongKong");
     expect(localStorage.getItem("subtitleScript")).toBe("hongKong");
+  });
+
+  it("writes zhuyin beside subtitles, telling Rust at once while they are on", async () => {
+    subtitlesAtom.set(true);
+    const calls = mockCommands({
+      list_models: () => [status(true)],
+      set_subtitles: () => null,
+    });
+    await renderPage(<SubtitlesCard />);
+
+    const zhuyin = screen
+      .getByRole("group", { name: "Readings" })
+      .getByRole("button", { name: "Zhuyin ㄅㄆㄇ" });
+    await zhuyin.click();
+
+    await expect.element(zhuyin).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(() => callsTo(calls, "set_subtitles"))
+      .toEqual([{ enabled: true, script: "simplified", reading: "zhuyin" }]);
+    expect(localStorage.getItem("subtitleReading")).toBe("zhuyin");
   });
 
   it("says where a download stopped, and tries again from there", async () => {

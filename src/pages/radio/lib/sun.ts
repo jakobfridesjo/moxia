@@ -1,4 +1,5 @@
 import type { CountryCode, Station } from "@/shared/api/commands.ts";
+import { provinceCapital } from "@/pages/radio/lib/provinces.ts";
 
 const RAD = Math.PI / 180;
 /** 2000-01-01 12:00 UTC, in days since the Unix epoch. */
@@ -25,6 +26,16 @@ export function sunAltitude(date: Date, latitude: number, longitude: number) {
   );
 }
 
+/** A new moon, 2000-01-06 18:14 UTC, in days since the Unix epoch, and the moon's month in days. */
+const NEW_MOON = 10_962.76;
+const LUNATION = 29.530_588;
+
+/** How much of the moon is lit at `date`, from 0 at new moon to 1 at full, to within a day or so. */
+export function moonLit(date: Date) {
+  const age = (((date.getTime() / 86_400_000 - NEW_MOON) % LUNATION) + LUNATION) % LUNATION;
+  return (1 - Math.cos((2 * Math.PI * age) / LUNATION)) / 2;
+}
+
 /** The sun is down, for the painting, once it is this far under the horizon: the end of the brightest dusk. */
 const NIGHT_BELOW = -4;
 
@@ -48,9 +59,13 @@ const CITIES: Record<CountryCode, [number, number]> = {
   MO: [22.19, 113.54],
 };
 
-/** Where `station` is, in degrees: where radio-browser says, else its region's main city. */
+/**
+ * Where `station` is, in degrees: where radio-browser says, else for the mainland its province's
+ * capital, else its region's main city.
+ */
 export function placeOf(region: CountryCode, station: Station | null): [number, number] {
-  if (station?.countryCode === region && station.latitude !== null && station.longitude !== null)
+  if (station?.countryCode !== region) return CITIES[region];
+  if (station.latitude !== null && station.longitude !== null)
     return [station.latitude, station.longitude];
-  return CITIES[region];
+  return (region === "CN" ? provinceCapital(station.state) : null) ?? CITIES[region];
 }

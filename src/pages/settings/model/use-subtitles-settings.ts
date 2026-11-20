@@ -1,7 +1,12 @@
 import { useSelector } from "@tanstack/react-store";
-import { subtitleScriptAtom, subtitlesAtom } from "@/shared/config/preferences.ts";
+import {
+  subtitleReadingAtom,
+  subtitleScriptAtom,
+  subtitlesAtom,
+} from "@/shared/config/preferences.ts";
 import {
   forgetSubtitles,
+  setSubtitleReading,
   setSubtitleScript,
   setSubtitles,
   subtitlesStatusAtom,
@@ -13,6 +18,7 @@ export function useSubtitlesSettings() {
   const models = useModelSettings("subtitles", { onDeleted: forgetSubtitles });
   const on = useSelector(subtitlesAtom);
   const script = useSelector(subtitleScriptAtom);
+  const reading = useSelector(subtitleReadingAtom);
   const status = useSelector(subtitlesStatusAtom);
 
   return {
@@ -31,5 +37,7 @@ export function useSubtitlesSettings() {
     setOn: (wanted: boolean) => void setSubtitles(wanted),
     script,
     setScript: setSubtitleScript,
+    reading,
+    setReading: setSubtitleReading,
   };
 }

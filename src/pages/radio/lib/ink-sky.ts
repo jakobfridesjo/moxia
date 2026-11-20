@@ -22,6 +22,15 @@ const PAINTED: Record<CountryCode, LocalWeather> = {
 export const weatherFor = (region: CountryCode, weather: LocalWeather | null) =>
   weather ?? PAINTED[region];
 
+const smoothstep = (from: number, to: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - from) / (to - from)));
+  return t * t * (3 - 2 * t);
+};
+
+/** How much moonlight reaches a painting, 0 to 1: as much as the moon is lit, less through cloud or fog. */
+export const moonlight = ({ weather, moon }: SkyNow) =>
+  (0.3 + 0.7 * moon) * (1 - 0.85 * smoothstep(0.4, 0.95, weather.cloud)) * (1 - 0.6 * weather.fog);
+
 /** Effect time a reduced-motion frame holds at. */
 const STILL_TIME = 23.7;
 
@@ -87,8 +96,12 @@ void main() {
   vec4 acc = vec4(0);
   // Dawn and dusk warm the sky, most at the top, and the paper more than the ink.
   lay(acc, vec3(1., .7, .45), u_air.z * .14 * smoothstep(1.1, 0., v) * (1. - .6 * inkA) * (1. - night));
-  // An overcast day greys everything a little.
+  // An overcast day greys everything a little; at night dark cloud drifts across the sky, hiding the moon.
   lay(acc, vec3(.5, .52, .55), smoothstep(.5, 1., u_weather.z) * .07 * (1. - night));
+  if (night > .5 && u_weather.z > .3) {
+    float cloud = fbm(vec2(css.x * .003 - u_time * (.006 + .03 * u_air.x), css.y * .006));
+    lay(acc, vec3(.06, .07, .09), smoothstep(.3, 1., u_weather.z) * smoothstep(.35, .7, cloud) * .35 * smoothstep(.75, 0., v));
+  }
   // Fog hangs in banks, thickest low down, and drifts with the wind.
   float fog = u_weather.w;
   if (fog > 0.) {
@@ -130,6 +143,8 @@ export interface SkyNow {
   /** The warmth of dawn or dusk, 0 to 1. */
   glow: number;
   night: boolean;
+  /** How much of the moon is lit, 0 at new moon to 1 at full. */
+  moon: number;
 }
 
 /** The sky over the paintings, reading what it holds from `now` each frame; null where the GPU can't draw it well. */

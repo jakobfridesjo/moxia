@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COLUMN_LENGTH, inkIn, inkLeft, isVertical, layOut } from "@/pages/radio/lib/captions.ts";
+import { inkIn, inkLeft, isChinese, layOut } from "@/pages/radio/lib/captions.ts";
 
 const caption = (at: number, duration: number, said: number[] = []) => ({
   text: "",
@@ -8,38 +8,36 @@ const caption = (at: number, duration: number, said: number[] = []) => ({
   at,
   emotion: "neutral" as const,
   emotionSure: 0,
+  readings: [] as string[],
   burst: null,
 });
 
 describe("layOut", () => {
-  it("writes Chinese in columns, read first on the right", () => {
-    const layout = layOut("六个星期嘅课程，包括六堂课同两个测验。");
-    expect(layout.vertical).toBe(true);
-    expect(layout.columns).toBe(3);
-    expect(layout.rows).toBe(COLUMN_LENGTH);
-    expect(layout.cells[0]).toEqual({ glyph: "六", column: 0, row: 0, from: 0 });
-    expect(layout.cells[COLUMN_LENGTH]).toEqual({ glyph: "括", column: 1, row: 0, from: 9 });
+  it("puts Chinese a character to a cell", () => {
+    const layout = layOut("六个星期嘅课程");
+    expect(layout.chinese).toBe(true);
+    expect(layout.cells.map((cell) => cell.glyph).join("")).toBe("六个星期嘅课程");
+    expect(layout.cells[1]).toEqual({ glyph: "个", reading: "", from: 1 });
   });
 
-  it("writes other scripts in lines of whole words", () => {
-    const layout = layOut("The tribal chieftain called for the boy.");
-    expect(layout.vertical).toBe(false);
-    expect(layout.cells.map((cell) => cell.glyph)).toEqual([
-      "The tribal",
-      "chieftain called",
-      "for the boy.",
-    ]);
-    expect(layout.cells.map((cell) => cell.from)).toEqual([0, 11, 28]);
+  it("puts other scripts a word to a cell", () => {
+    const layout = layOut("The tribal chieftain.");
+    expect(layout.chinese).toBe(false);
+    expect(layout.cells.map((cell) => cell.glyph)).toEqual(["The", "tribal", "chieftain."]);
+    expect(layout.cells.map((cell) => cell.from)).toEqual([0, 4, 11]);
   });
 
   it("keeps each character's place in the text past the spaces it drops", () => {
     expect(layOut("早上 好").cells.map((cell) => cell.from)).toEqual([0, 1, 3]);
+    expect(
+      layOut("早上 好", ["zǎo", "shang", "", "hǎo"]).cells.map((cell) => cell.reading)
+    ).toEqual(["zǎo", "shang", "hǎo"]);
   });
 
   it("goes by what most of the letters are", () => {
-    expect(isVertical("开放时间早上9点")).toBe(true);
-    expect(isVertical("OK 好")).toBe(false);
-    expect(isVertical("。")).toBe(false);
+    expect(isChinese("开放时间早上9点")).toBe(true);
+    expect(isChinese("OK 好")).toBe(false);
+    expect(isChinese("。")).toBe(false);
   });
 });
 

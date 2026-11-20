@@ -6,8 +6,10 @@ import { formatTapeTime } from "@/shared/lib/duration.ts";
 import { cn } from "@/shared/lib/class-names.ts";
 import { noteAt } from "@/pages/radio/model/radio-state.ts";
 import { useLocalSky } from "@/pages/radio/model/use-local-sky.ts";
+import { useMediaControls } from "@/pages/radio/model/use-media-controls.ts";
 import { useListenTogether } from "@/pages/radio/model/use-listen-together.ts";
 import { useRadioManager } from "@/pages/radio/model/use-radio-manager.ts";
+import { CategorySeal } from "@/pages/radio/ui/CategorySeal.tsx";
 import { ChatDrift } from "@/pages/radio/ui/ChatDrift.tsx";
 import { InkScene, type Move } from "@/pages/radio/ui/InkScene.tsx";
 import { Inscription } from "@/pages/radio/ui/Inscription.tsx";
@@ -34,6 +36,7 @@ function RadioManager() {
   const [welcome, setWelcome] = useState(true);
   const [move, setMove] = useState<Move | null>(null);
   const down = useRef<{ x: number; y: number } | null>(null);
+  const keys = useRef<HTMLDivElement>(null);
   const { mode, station, tape } = radio;
   const showing = tape?.station ?? station;
   const playingBack = mode === "playback" || mode === "paused";
@@ -91,15 +94,17 @@ function RadioManager() {
 
   const nowLine = radio.error
     ? radio.error
-    : radio.connecting
-      ? m.radio.connecting
-      : tape
-        ? (noteAt(tape.notes, radio.tapePosition)?.title ?? null)
-        : mode === "live"
-          ? radio.nowPlaying
-            ? m.radio.onAir(radio.nowPlaying)
-            : m.radio.live
-          : station && m.radio.stopped;
+    : radio.reconnecting
+      ? m.radio.reconnecting
+      : radio.connecting
+        ? m.radio.connecting
+        : tape
+          ? (noteAt(tape.notes, radio.tapePosition)?.title ?? null)
+          : mode === "live"
+            ? radio.nowPlaying
+              ? m.radio.onAir(radio.nowPlaying)
+              : m.radio.live
+            : station && m.radio.stopped;
   const placeLine = tape
     ? formatShortDateTime(tape.recordedAt)
     : showing && [m.countries[showing.countryCode], showing.state].filter(Boolean).join(" · ");
@@ -117,10 +122,19 @@ function RadioManager() {
   // The inscription is written in Chinese; what needs reading in the interface's language shows below it.
   const notice =
     radio.error ??
-    (radio.connecting ? m.radio.connecting : extraLine) ??
+    (radio.reconnecting
+      ? m.radio.reconnecting
+      : radio.connecting
+        ? m.radio.connecting
+        : extraLine) ??
     (radio.subtitles === "loading" ? m.radio.subtitlesLoading : null);
   const region = showing?.countryCode ?? "CN";
   const sky = useLocalSky(region, showing ?? null);
+  const playing = mode === "live" || mode === "playback";
+  useMediaControls(
+    { title: showing?.name ?? null, artist: programme, playing },
+    { toggle: radio.toggle, seek: radio.seek, playing }
+  );
   const hint =
     radio.hint ??
     notice ??
@@ -161,11 +175,12 @@ function RadioManager() {
         <InkScene
           region={region}
           station={showing ?? null}
-          listening={mode === "live" || mode === "playback"}
+          listening={(mode === "live" && !radio.reconnecting) || mode === "playback"}
           writing={radio.recording}
           move={move}
           sky={sky}
           covered={pathOpen}
+          keys={keys}
         />
 
         <div role="status" aria-live="polite" className="sr-only">
@@ -180,7 +195,10 @@ function RadioManager() {
           recordedAt={tape?.recordedAt ?? null}
         />
 
-        <div className="absolute top-[max(1rem,env(safe-area-inset-top))] left-[max(1rem,env(safe-area-inset-left))] grid gap-3">
+        <div
+          ref={keys}
+          className="absolute top-[max(1rem,env(safe-area-inset-top))] left-[max(1rem,env(safe-area-inset-left))] grid grid-cols-2 gap-2"
+        >
           <Seal
             aria-label={m.radio.sealLabels.settings}
             onClick={() => void navigate({ to: "/settings" })}
@@ -211,7 +229,7 @@ function RadioManager() {
           >
             {m.radio.seals.subtitles}
           </Seal>
-          <div className="relative">
+          <div className="relative grid">
             <Seal
               pressed={inRoom}
               aria-label={
@@ -239,31 +257,35 @@ function RadioManager() {
           )}
         </div>
 
-        <div className="absolute bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))]">
+        {inRoom && sheet !== "chat" && <ChatDrift lines={together.room.lines} />}
+
+        <div className="absolute right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))] flex items-end">
           <PresetBlock
             slots={radio.presets}
             onAirId={mode === "live" ? (station?.id ?? null) : null}
             onPlay={radio.playPreset}
             onStore={radio.storePreset}
           />
-        </div>
-
-        {inRoom && sheet !== "chat" && <ChatDrift lines={together.room.lines} />}
-
-        <div className="absolute right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1.5rem,env(safe-area-inset-bottom))] flex items-center gap-4">
-          {inRoom && (
-            <Seal aria-label={m.radio.sealLabels.chat} onClick={() => setSheet("chat")}>
-              {m.radio.seals.chat}
+          <div className="flex h-11 flex-1 items-center justify-center">
+            {!playingBack && <CategorySeal category={radio.category} onPick={radio.pickCategory} />}
+          </div>
+          <div className="flex items-center gap-4">
+            {inRoom && (
+              <Seal aria-label={m.radio.sealLabels.chat} onClick={() => setSheet("chat")}>
+                {m.radio.seals.chat}
+              </Seal>
+            )}
+            <Seal
+              shape="round"
+              pressed={radio.recording}
+              aria-label={
+                radio.recording ? m.radio.sealLabels.stopRecording : m.radio.sealLabels.rec
+              }
+              onClick={() => void radio.record()}
+            >
+              {m.radio.seals.rec}
             </Seal>
-          )}
-          <Seal
-            shape="round"
-            pressed={radio.recording}
-            aria-label={radio.recording ? m.radio.sealLabels.stopRecording : m.radio.sealLabels.rec}
-            onClick={() => void radio.record()}
-          >
-            {m.radio.seals.rec}
-          </Seal>
+          </div>
         </div>
 
         {pathOpen && (

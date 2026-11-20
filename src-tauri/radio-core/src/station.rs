@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::category::{self, Category};
+
 /// The places whose stations the app lists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Country {
@@ -51,6 +53,9 @@ pub struct Station {
     /// A remote image; the frontend shows it through `Favicons`.
     pub favicon: Option<String>,
     pub tags: Vec<String>,
+    /// What `tags` and `name` say it is, read again whenever the list is loaded.
+    #[serde(default)]
+    pub categories: Vec<Category>,
     pub country_code: Country,
     /// The province or region.
     pub state: Option<String>,
@@ -64,6 +69,13 @@ pub struct Station {
     pub hls: bool,
     pub votes: u32,
     pub click_count: u32,
+}
+
+impl Station {
+    /// Reads `categories` again from the tags and the name.
+    pub fn categorize(&mut self) {
+        self.categories = category::categories(&self.tags, &self.name);
+    }
 }
 
 /// Every station once, the most listened to first.
@@ -91,6 +103,7 @@ pub(crate) fn station(id: &str, click_count: u32) -> Station {
         homepage: None,
         favicon: None,
         tags: vec!["news".to_owned()],
+        categories: vec![Category::News],
         country_code: Country::Taiwan,
         state: None,
         latitude: None,
@@ -130,6 +143,7 @@ mod tests {
                 "homepage": null,
                 "favicon": null,
                 "tags": ["news"],
+                "categories": ["news"],
                 "countryCode": "TW",
                 "state": null,
                 "latitude": null,

@@ -49,6 +49,8 @@ realfft = "3.5"
 ureq = "3"
 # Writes subtitles in traditional characters (OpenCC's rules, in pure Rust).
 ferrous-opencc = { version = "0.4", default-features = false, features = ["s2t-conversion"] }
+# Readings over subtitles: pinyin by whole words, so a polyphone reads as the word around it says.
+pinyin_pro = "3.29"
 # Stream titles from stations that send GBK or Big5.
 encoding_rs = "0.8"
 url = "2"

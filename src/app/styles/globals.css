@@ -157,6 +157,15 @@
   }
 }
 
+/* While the phone's camera scans, it lies under the see-through page: only the scanner's frame shows. */
+html.scanning,
+html.scanning body {
+  background: transparent !important;
+}
+html.scanning body > :not([data-scanner]) {
+  visibility: hidden;
+}
+
 /* Menus are solid, so the text they cover does not show through. */
 [data-slot="dropdown-menu-content"],
 [data-slot="dropdown-menu-sub-content"],

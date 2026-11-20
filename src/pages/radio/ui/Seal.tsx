@@ -1,7 +1,7 @@
 import { Fragment, useId, type ComponentProps } from "react";
 import { cn } from "@/shared/lib/class-names.ts";
 import { playKeyClick } from "@/shared/lib/key-sound.ts";
-import { glyphFilter, inkFilter, STONES } from "@/pages/radio/lib/seal-ink.ts";
+import { glyphFilter, inkFilter, STONES, WASH_FILTER } from "@/pages/radio/lib/seal-ink.ts";
 
 type SealShape = "square" | "round";
 
@@ -27,6 +27,7 @@ const SHAPES: Record<
 /**
  * The worn-stone filters every seal is printed through. Mount once per screen; seals refer to them by id.
  * The body gets the full wear and a faint mottle in the paste; characters a lighter wear, so they stay legible.
+ * The wash under a seal is feathered past its edge, so the seal sits on cleared paper, not on a tile.
  */
 export function SealInk() {
   return (
@@ -51,6 +52,9 @@ export function SealInk() {
             />
           </Fragment>
         ))}
+        <filter id="seal-wash" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation={3} />
+        </filter>
       </defs>
     </svg>
   );
@@ -154,7 +158,7 @@ interface SealMarkProps {
 
 /**
  * One seal impression: red worn into the painting, over a faint paper wash that keeps the character
- * readable on busy brushwork. The ink multiplies with the painting, so the wash sits in its own layer.
+ * readable on busy brushwork, feathered past the edge. The ink multiplies with the painting, so the wash sits in its own layer.
  * At night the red lies on top instead, since multiplied into dark paper it would vanish, and needs no
  * wash: it reads on the dark as it is.
  */
@@ -188,8 +192,8 @@ export function SealMark({
   );
   return (
     <span aria-hidden className={cn("grid shrink-0", className)}>
-      <svg {...box} className="col-start-1 row-start-1 dark:hidden">
-        <path d={outline} className="fill-paper opacity-55" />
+      <svg {...box} className="col-start-1 row-start-1 overflow-visible dark:hidden">
+        <path d={outline} filter={WASH_FILTER} className="fill-paper opacity-75" />
       </svg>
       <svg
         {...box}

@@ -38,7 +38,8 @@ mise android:install  # install it on the adb-connected phone
 
 - `android:build` first installs the NDK (`android:sdk`) and creates the release key in `~/.android` (`android:keystore`), outside the repo.
 - Pair a phone over Wi-Fi with `adb pair`.
-- Sound goes out through AAudio (cpal). Playing on with the screen off needs an Android foreground service, which the app does not have yet.
+- Sound goes out through AAudio (cpal). It plays on with the screen off through `MediaPlaybackService.kt`, a media playback foreground service in `gen/android` that holds a partial wake lock and a Wi-Fi lock while something plays, and carries the media session for the lock screen, the notification and headset buttons. `MediaSessionPlugin.kt` beside it is the app's own Tauri plugin, registered from `src-tauri/src/media.rs`; both are kept in git with the rest of `gen/android`.
+- The camera (for invites) comes from Tauri's barcode scanner plugin, which declares it required: stores would hide the app from phones without one.
 
 ## macOS
 

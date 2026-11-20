@@ -2,19 +2,21 @@
 
 ## Layout
 
-| Path                         | What it is                                                  |
-| ---------------------------- | ----------------------------------------------------------- |
-| `src/`                       | React frontend (Vite), the top-level project                |
-| `src-tauri/radio-core/`      | All logic, with no Tauri dependency                         |
-| `src-tauri/src/commands.rs`  | Tauri commands: a thin layer over `radio-core`              |
-| `src/shared/api/commands.ts` | The frontend's only way into Rust; there is no HTTP backend |
+| Path                         | What it is                                                      |
+| ---------------------------- | --------------------------------------------------------------- |
+| `src/`                       | React frontend (Vite), the top-level project                    |
+| `src-tauri/radio-core/`      | All logic, with no Tauri dependency                             |
+| `src-tauri/src/commands.rs`  | Tauri commands: a thin layer over `radio-core`                  |
+| `src-tauri/src/media.rs`     | The system's media controls (souvlaki; Android's media session) |
+| `src/shared/api/commands.ts` | The frontend's only way into Rust; there is no HTTP backend     |
 
 ### `radio-core`
 
 | Module           | Does                                                                                                  |
 | ---------------- | ----------------------------------------------------------------------------------------------------- |
 | `radio_browser`  | Talks to radio-browser, trying its mirrors in turn; counts each play                                  |
-| `catalog`        | Every CN, TW, HK and MO station, cached in memory and on disk for a day                               |
+| `catalog`        | Every CN, TW, HK and MO station, cached in memory and on disk for a day, categorized at each load     |
+| `category`       | Reads a station's categories (music, news, talk, traffic, full service) out of its tags and name      |
 | `store`          | SQLite: favourites, their preset keys and the 30 last played                                          |
 | `favicon`        | Fetches station logos and hands them over as `data:` URLs, cached on disk                             |
 | `player`         | Fetches, decodes (symphonia) and plays (rodio) one station or tape at a time                          |
@@ -29,7 +31,7 @@
 
 **Types are mirrored by hand.** The TypeScript types in `commands.ts` copy the serde types. When you change one side, change the other and the `serializes_*_with_the_frontend_field_names` tests in `station.rs` and `player/mod.rs`.
 
-**Errors** come back as the Rust error message, a plain string. **Player events** (`connecting`, `playing`, `buffering`, `nowPlaying`, `level`, `subtitle`, `stopped`, `error`) go through the `Channel` passed to `play` or `play_tape`; a new play or `stop` silences the old channel. `level` comes about 20 times a second while playing.
+**Errors** come back as the Rust error message, a plain string. **Player events** (`connecting`, `playing`, `buffering`, `reconnecting`, `nowPlaying`, `level`, `subtitle`, `stopped`, `error`) go through the `Channel` passed to `play` or `play_tape`; a new play or `stop` silences the old channel. `level` comes about 20 times a second while playing.
 
 **Room events** (`listeners`, `joined`, `left`, `said`, `tuned`, `closed`) go through the `Channel` passed to `open_room` or `join_room`; leaving or entering another room silences it.
 
@@ -40,6 +42,8 @@ A play runs a session on its own thread:
 1. `player/source.rs` opens the stream URL. A plain stream has its ICY metadata taken out, reporting each stream title (UTF-8, else GBK for CN stations and Big5 for the rest). A `.pls` or `.m3u` playlist is followed.
 2. An HLS playlist goes to `player/hls.rs`, which follows the live playlist from three segments before its end. `player/segment.rs` turns each segment into the ADTS AAC or MP3 inside it, demultiplexing MPEG-TS. Encrypted and fragmented-MP4 HLS are refused.
 3. symphonia decodes the bytes to PCM, gathered into tenth-of-a-second chunks on a rodio player, which starts once two seconds are queued (six while subtitles are on) and pauses when the queue runs dry.
+
+A station that drops after it has played (its server closes the stream, or sends nothing for 20 s) is opened again after 1, 2, 4, 8, 15 and 30 s, with a `reconnecting` event before each try; once it plays again the count starts over, and after about a minute it is given up with an `error`. A tape being recorded carries on across. A station that never played, and a tape, are not tried again.
 
 Ogg Opus is not supported (symphonia has no Opus decoder).
 
@@ -73,6 +77,10 @@ tract's GPU runtime gives wrong answers when a graph runs on another thread than
 - **Members** (`together/members.rs`, pure and unit-tested): whoever joins says `Hello` and everyone answers `Here`, with what they play. A newcomer follows the first station it hears of and keeps its own changes of station to itself until then, so joining never retunes the room; the frontend follows the same rule from the `listeners` event, which comes after `tuned`. Someone is counted out on `Bye` or when their connection drops. `Tune` retunes everyone.
 - The room test in `together/mod.rs` runs two listeners over the real network and is ignored by default: `cargo test -p radio-core -- --ignored`.
 
+## Media controls
+
+The frontend shows what plays with `show_media` (the station, what it says is on air, whether it plays) and hands `watch_media` a channel for the buttons pressed: `play`, `pause`, `toggle`, `next`, `previous` and `stop`. On Linux they are an MPRIS player (`org.mpris.MediaPlayer2.moxia`, souvlaki over zbus), so desktop media menus and keyboard media keys reach the radio; on macOS the Now Playing centre and on Windows the system transport controls. On Android, `media.rs` forwards both commands to `MediaSessionPlugin.kt`, the channel included, whose `MediaPlaybackService` keeps the radio playing with the screen off. `model/use-media-controls.ts` decides what a button means: play and pause stop or start the radio as its own button does, next and previous change station or recording.
+
 ## Data
 
 | Data               | Where                       |
@@ -105,3 +113,5 @@ Reading, parsing and decluttering the 937 MB ONNX file takes most of a load, so 
 `Model::Translator` is opus-mt-zh-en (Helsinki-NLP's Marian model, in Xenova's fp16 ONNX export), about 337 MB: `source.spm` (its SentencePiece tokenizer, built from source with cmake), `vocab.json`, and the encoder and decoder graphs, with and without the decoder's cache. `translate` loads it on the first call (`Translator` in `translation.rs`, kept in `AppState` until the model is deleted) and decodes greedily into English; it reads simplified and traditional alike.
 
 SenseVoice writes simplified Chinese for every station. `set_subtitles` also takes the script subtitles are written in; for traditional, the subtitler thread converts each subtitle with OpenCC's `s2tw` or `s2hk` rules (`speech/script.rs`, ferrous-opencc): Taiwan's or Hong Kong's standard forms (裡 or 裏), leaving the words as they were said.
+
+It takes a reading too (`speech/reading.rs`): none, pinyin or zhuyin. Each subtitle's simplified text is read by [pinyin_pro](https://crates.io/crates/pinyin_pro), a Rust port of pinyin-pro, which reads by whole words (银行 háng, 行长 zhǎng) and changes the tones of 一 and 不 as they are said. Zhuyin is turned from that pinyin as Taiwan writes it, the tone after the syllable and the neutral tone's dot before it. The `subtitle` event carries one reading for each character of its text (empty for what is not Chinese), kept in step through the conversion to traditional as `said` is.

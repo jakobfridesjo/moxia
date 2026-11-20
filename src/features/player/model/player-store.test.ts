@@ -29,6 +29,15 @@ describe("applyPlayerEvent", () => {
     expect(buffering).toMatchObject({ status: "buffering", nowPlaying: "周杰伦 - 晴天" });
   });
 
+  it("keeps the stream open, and what it was recording, while a dropped station is tried again", () => {
+    const recording = { since: 0, notes: [] };
+    const playing = { ...connecting, status: "playing" as const, recording };
+    const retrying = applyPlayerEvent(playing, { kind: "reconnecting", attempt: 1 });
+    expect(retrying).toMatchObject({ status: "reconnecting", recording });
+    expect(isActive(retrying.status)).toBe(true);
+    expect(applyPlayerEvent(retrying, { kind: "playing" }).status).toBe("playing");
+  });
+
   it("drops an empty title", () => {
     const titled = applyPlayerEvent(connecting, { kind: "nowPlaying", title: "  " });
     expect(titled.nowPlaying).toBeNull();

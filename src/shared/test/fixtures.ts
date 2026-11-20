@@ -10,6 +10,7 @@ export function makeStation(overrides: Partial<Station> = {}): Station {
     homepage: null,
     favicon: null,
     tags: [],
+    categories: [],
     countryCode: "CN",
     state: null,
     latitude: null,

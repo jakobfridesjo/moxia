@@ -1,4 +1,5 @@
 import { COUNTRY_CODES, type Station } from "@/shared/api/commands.ts";
+import type { CategoryFilter } from "@/shared/config/preferences.ts";
 
 /** The order seeking steps through: by country, then region, then name. */
 export function dialOrder(stations: Station[]): Station[] {
@@ -9,6 +10,31 @@ export function dialOrder(stations: Station[]): Station[] {
       (a.state ?? "").localeCompare(b.state ?? "", "zh") ||
       a.name.localeCompare(b.name, "zh")
   );
+}
+
+/** Whether seeking with `filter` stops at `station`. */
+export const inCategory = (station: Station, filter: CategoryFilter) =>
+  filter === "all" || station.categories.includes(filter);
+
+/**
+ * The nearest station `step` along `order` from `current` that is in `filter`, wrapping around the
+ * ends, so a station outside the category keeps its place on the dial; the first or last in it when
+ * `current` is not in `order`, and `current` itself when it is the only one.
+ */
+export function seekStation(
+  order: Station[],
+  current: Station | null,
+  step: -1 | 1,
+  filter: CategoryFilter
+) {
+  const size = order.length;
+  const at = current ? order.findIndex((station) => station.id === current.id) : -1;
+  const from = at >= 0 ? at : step > 0 ? -1 : size;
+  for (let steps = 1; steps <= size; steps++) {
+    const station = order[(((from + step * steps) % size) + size) % size];
+    if (inCategory(station, filter)) return station;
+  }
+  return null;
 }
 
 /** The first station of the next country along `order` from `current`'s, or the previous one for `step` −1. */

@@ -33,7 +33,7 @@ use symphonia::core::io::{MediaSourceStream, ReadOnlySource};
 use symphonia::core::meta::MetadataOptions;
 
 use crate::error::{Error, Result};
-use crate::speech::{Burst, Emotion, Script, Sound, Sounding, Speech, Subtitle, Subtitler};
+use crate::speech::{Burst, Emotion, Sound, Sounding, Speech, Subtitle, Subtitler, Writing};
 use crate::station::Station;
 use crate::tapes::{Recorder, Tape, Tapes};
 use meter::{Levels, Metered};
@@ -55,6 +55,9 @@ const SUBTITLER_QUEUE: usize = 30 * CHUNKS_PER_SECOND;
 const MIN_SUBTITLE_SECONDS: f64 = 1.0;
 /// Audio, in chunks, decoded ahead at most.
 const MAX_CHUNKS: usize = 10 * CHUNKS_PER_SECOND;
+/// How long to wait before each try at reaching a station that dropped, in
+/// seconds, about a minute in all; then it is given up.
+const RECONNECT_SECONDS: [u64; 6] = [1, 2, 4, 8, 15, 30];
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -79,6 +82,8 @@ pub enum PlayerEvent {
         duration: f32,
         /// When each character of `text` is said, in seconds from now.
         said: Vec<f32>,
+        /// How each character of `text` is read, in pinyin or zhuyin; empty when not.
+        readings: Vec<String>,
         /// How the voice sounds, and how sure the model is of it, from 0 to 1.
         emotion: Emotion,
         #[serde(rename = "emotionSure")]
@@ -89,6 +94,10 @@ pub enum PlayerEvent {
     /// What plays from now on, while subtitles are on: talk, singing, music or quiet.
     Sound {
         sound: Sound,
+    },
+    /// The station dropped after playing; it is tried again, the `attempt`th time, until it answers or is given up.
+    Reconnecting {
+        attempt: u32,
     },
     /// The stream ended.
     Stopped,
@@ -101,10 +110,12 @@ type Events = Arc<dyn Fn(PlayerEvent) + Send + Sync>;
 type OnTitle = Box<dyn FnMut(String) + Send>;
 /// Opens what a session plays, once its output is ready.
 type Open = Box<dyn FnOnce(&Arc<AtomicBool>, OnTitle) -> Result<Source> + Send>;
+/// Opens it again each time it is called; `None` when there is nothing more to open (a tape plays once).
+type Opens = Box<dyn FnMut() -> Option<Open> + Send>;
 type Recording = Arc<Mutex<Option<Recorder>>>;
 /// The subtitle models, while subtitles are on.
 type SpeechSlot = Arc<Mutex<Option<Arc<Speech>>>>;
-type ScriptSlot = Arc<Mutex<Script>>;
+type WritingSlot = Arc<Mutex<Writing>>;
 /// Decoded chunks for the subtitler, each with where it starts in the session, in seconds.
 type SubtitlerQueue = SyncSender<(f64, Decoded)>;
 
@@ -121,7 +132,7 @@ pub struct Player {
     volume: Arc<AtomicU32>,
     session: Mutex<Option<Session>>,
     speech: SpeechSlot,
-    script: ScriptSlot,
+    writing: WritingSlot,
 }
 
 struct Session {
@@ -159,7 +170,7 @@ impl Player {
             volume: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
             session: Mutex::new(None),
             speech: Arc::new(Mutex::new(None)),
-            script: Arc::new(Mutex::new(Script::default())),
+            writing: Arc::new(Mutex::new(Writing::default())),
         }
     }
 
@@ -169,9 +180,9 @@ impl Player {
         *lock(&self.speech) = speech;
     }
 
-    /// Writes subtitles transcribed from now on in `script`.
-    pub fn set_script(&self, script: Script) {
-        *lock(&self.script) = script;
+    /// Writes subtitles transcribed from now on as `writing` asks.
+    pub fn set_writing(&self, writing: Writing) {
+        *lock(&self.writing) = writing;
     }
 
     /// Stops whatever is playing and starts `station`, reporting through
@@ -185,9 +196,13 @@ impl Player {
         let agent = self.agent.clone();
         let url = station.stream_url.clone();
         let encoding = station.country_code.legacy_encoding();
-        let open: Open =
-            Box::new(move |stop, on_title| source::open(&agent, stop, &url, encoding, on_title));
-        self.start(Some(station.clone()), volume, events, open)
+        let opens: Opens = Box::new(move || {
+            let (agent, url) = (agent.clone(), url.clone());
+            Some(Box::new(move |stop: &Arc<AtomicBool>, on_title| {
+                source::open(&agent, stop, &url, encoding, on_title)
+            }))
+        });
+        self.start(Some(station.clone()), volume, events, opens)
     }
 
     /// Stops whatever is playing and plays the tape in `path` from `from`
@@ -211,7 +226,8 @@ impl Player {
                 extension: Some(codec.extension()),
             })
         });
-        self.start(None, volume, events, open)?;
+        let mut once = Some(open);
+        self.start(None, volume, events, Box::new(move || once.take()))?;
         Ok(frame.start)
     }
 
@@ -220,7 +236,7 @@ impl Player {
         station: Option<Station>,
         volume: f32,
         events: impl Fn(PlayerEvent) + Send + Sync + 'static,
-        open: Open,
+        opens: Opens,
     ) -> Result<()> {
         self.set_volume(volume);
         let session = Session {
@@ -243,10 +259,10 @@ impl Player {
                 codec: Arc::clone(&session.codec),
                 recording: Arc::clone(&session.recording),
                 speech: Arc::clone(&self.speech),
-                script: Arc::clone(&self.script),
+                writing: Arc::clone(&self.writing),
             };
             let volume = Arc::clone(&self.volume);
-            move || run(open, &session, &volume, &events)
+            move || run(opens, &session, &volume, &events)
         };
         if let Some(previous) = lock(&self.session).replace(session) {
             previous.stop();
@@ -322,12 +338,12 @@ struct SessionHandles {
     codec: Arc<Mutex<Option<Codec>>>,
     recording: Recording,
     speech: SpeechSlot,
-    script: ScriptSlot,
+    writing: WritingSlot,
 }
 
-fn run(open: Open, session: &SessionHandles, volume: &AtomicU32, events: &Events) {
+fn run(mut opens: Opens, session: &SessionHandles, volume: &AtomicU32, events: &Events) {
     events(PlayerEvent::Connecting);
-    let result = stream(open, session, volume, events);
+    let result = keep_playing(&mut opens, session, volume, events);
     finish(&session.recording);
     match result {
         Ok(()) => events(PlayerEvent::Stopped),
@@ -340,6 +356,67 @@ fn run(open: Open, session: &SessionHandles, volume: &AtomicU32, events: &Events
     }
 }
 
+/// Plays what `opens` opens, opening it again when it drops after playing,
+/// a little later each time, until it plays again or is given up. A recording
+/// carries on across.
+fn keep_playing(
+    opens: &mut Opens,
+    session: &SessionHandles,
+    volume: &AtomicU32,
+    events: &Events,
+) -> Result<()> {
+    let mut open = opens();
+    let mut played_once = false;
+    let mut attempt = 0;
+    loop {
+        let Some(this) = open.take() else {
+            return Ok(());
+        };
+        let mut played = false;
+        let result = stream(this, session, volume, events, &mut played);
+        played_once |= played;
+        if played {
+            attempt = 0;
+        }
+        if session.stop.load(Ordering::Relaxed) || !played_once {
+            return result;
+        }
+        open = opens();
+        if open.is_none() {
+            return result;
+        }
+        let Some(&wait) = RECONNECT_SECONDS.get(attempt) else {
+            return Err(result
+                .err()
+                .unwrap_or_else(|| Error::Stream("the station stopped sending".to_owned())));
+        };
+        if let Err(error) = &result {
+            log::warn!("{error}; trying again");
+        }
+        attempt += 1;
+        events(PlayerEvent::Reconnecting {
+            attempt: attempt as u32,
+        });
+        if !wait_unless_stopped(Duration::from_secs(wait), &session.stop) {
+            return Ok(());
+        }
+    }
+}
+
+/// Waits `time`, unless `stop` is set first; whether it waited it out.
+fn wait_unless_stopped(time: Duration, stop: &AtomicBool) -> bool {
+    let step = Duration::from_millis(100);
+    let mut waited = Duration::ZERO;
+    while waited < time {
+        if stop.load(Ordering::Relaxed) {
+            return false;
+        }
+        thread::sleep(step);
+        waited += step;
+    }
+    !stop.load(Ordering::Relaxed)
+}
+
 /// Ends the tape being recorded, if any, keeping it.
 fn finish(recording: &Recording) {
     let recorder = lock(recording).take();
@@ -348,15 +425,21 @@ fn finish(recording: &Recording) {
     }
 }
 
-/// Plays what `open` opens until it ends or `stop` is set.
-fn stream(open: Open, session: &SessionHandles, volume: &AtomicU32, events: &Events) -> Result<()> {
+/// Plays what `open` opens until it ends or `stop` is set; `played` is set once it has played.
+fn stream(
+    open: Open,
+    session: &SessionHandles,
+    volume: &AtomicU32,
+    events: &Events,
+    played: &mut bool,
+) -> Result<()> {
     let SessionHandles {
         stop,
         output,
         codec,
         recording,
         speech,
-        script,
+        writing,
     } = session;
     // The device's stream cannot move between threads, so each session opens its own.
     let mut device =
@@ -421,7 +504,7 @@ fn stream(open: Open, session: &SessionHandles, volume: &AtomicU32, events: &Eve
 
     let state = Arc::new(AtomicU8::new(STARTING));
     let levels = Arc::new(Levels::default());
-    let mut captions = Captions::new(Arc::clone(speech), Arc::clone(script), Arc::clone(stop));
+    let mut captions = Captions::new(Arc::clone(speech), Arc::clone(writing), Arc::clone(stop));
     let start_chunks = if lock(speech).is_some() {
         SUBTITLED_START_CHUNKS
     } else {
@@ -474,6 +557,7 @@ fn stream(open: Open, session: &SessionHandles, volume: &AtomicU32, events: &Eve
             timeline += full.seconds();
             player.append(Metered::new(full.into_buffer(), Arc::clone(&levels)));
             pace(&player, stop, &state, start_chunks, events);
+            *played |= state.load(Ordering::Relaxed) == PLAYING;
         }
     };
     if let Some(rest) = chunk.take() {
@@ -617,6 +701,7 @@ fn release(due: &mut Due, played: f64) -> Vec<PlayerEvent> {
                 .iter()
                 .map(|at| (at - played).max(0.0) as f32)
                 .collect(),
+            readings: subtitle.readings,
             emotion: subtitle.emotion,
             emotion_sure: subtitle.emotion_sure,
             burst: subtitle.burst,
@@ -629,7 +714,7 @@ fn release(due: &mut Due, played: f64) -> Vec<PlayerEvent> {
 /// on, and holds what it writes until the output plays it.
 struct Captions {
     speech: SpeechSlot,
-    script: ScriptSlot,
+    writing: WritingSlot,
     stop: Arc<AtomicBool>,
     /// The models the running subtitler uses, and its queue.
     worker: Option<(Arc<Speech>, SubtitlerQueue)>,
@@ -637,10 +722,10 @@ struct Captions {
 }
 
 impl Captions {
-    fn new(speech: SpeechSlot, script: ScriptSlot, stop: Arc<AtomicBool>) -> Self {
+    fn new(speech: SpeechSlot, writing: WritingSlot, stop: Arc<AtomicBool>) -> Self {
         Self {
             speech,
-            script,
+            writing,
             stop,
             worker: None,
             due: Arc::new(Mutex::new(Due::default())),
@@ -674,9 +759,9 @@ impl Captions {
 
     fn spawn(&self, speech: Arc<Speech>) -> SubtitlerQueue {
         let (queue, chunks) = sync_channel::<(f64, Decoded)>(SUBTITLER_QUEUE);
-        let (due, script, stop) = (
+        let (due, writing, stop) = (
             Arc::clone(&self.due),
-            Arc::clone(&self.script),
+            Arc::clone(&self.writing),
             Arc::clone(&self.stop),
         );
         let spawned = thread::Builder::new()
@@ -689,13 +774,13 @@ impl Captions {
                     }
                     let heard =
                         subtitler.push(at, &chunk.samples, chunk.channels.get(), chunk.rate.get());
-                    let script = *lock(&script);
+                    let writing = *lock(&writing);
                     let mut due = lock(&due);
                     due.subtitles.extend(
                         heard
                             .subtitles
                             .into_iter()
-                            .map(|subtitle| subtitle.written_in(script)),
+                            .map(|subtitle| subtitle.written_in(writing)),
                     );
                     due.sounds.extend(heard.sounds);
                 }
@@ -805,16 +890,22 @@ mod tests {
             serde_json::json!({ "kind": "connecting" })
         );
         assert_eq!(
+            json(PlayerEvent::Reconnecting { attempt: 2 }),
+            serde_json::json!({ "kind": "reconnecting", "attempt": 2 })
+        );
+        assert_eq!(
             json(PlayerEvent::Subtitle {
                 text: "早晨".to_owned(),
                 duration: 2.5,
                 said: vec![0.0, 1.5],
+                readings: vec!["zǎo".to_owned(), "chen".to_owned()],
                 emotion: Emotion::Happy,
                 emotion_sure: 0.5,
                 burst: Some(Burst::Laughter),
             }),
             serde_json::json!({
                 "kind": "subtitle", "text": "早晨", "duration": 2.5, "said": [0.0, 1.5],
+                "readings": ["zǎo", "chen"],
                 "emotion": "happy", "emotionSure": 0.5, "burst": "laughter"
             })
         );
@@ -854,6 +945,7 @@ mod tests {
             end,
             text: text.to_owned(),
             said: vec![start + 0.5],
+            readings: Vec::new(),
             emotion: Emotion::Neutral,
             emotion_sure: 0.9,
             burst: None,
@@ -865,6 +957,7 @@ mod tests {
             text: text.to_owned(),
             duration,
             said: vec![0.0],
+            readings: Vec::new(),
             emotion: Emotion::Neutral,
             emotion_sure: 0.9,
             burst: None,

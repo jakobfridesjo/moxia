@@ -1,4 +1,5 @@
 mod commands;
+mod media;
 
 use radio_core::catalog::Catalog;
 use radio_core::favicon::Favicons;
@@ -32,6 +33,9 @@ pub fn run() {
                     .build(),
             )?;
 
+            #[cfg(mobile)]
+            app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
+
             let data_dir = app.path().app_data_dir()?;
             let cache_dir = app.path().app_cache_dir()?;
             std::fs::create_dir_all(&data_dir)?;
@@ -45,6 +49,13 @@ pub fn run() {
                 Tapes::new(data_dir.join("tapes")),
                 Models::new(data_dir.join("models")),
             ));
+
+            #[cfg(target_os = "android")]
+            app.handle().plugin(media::Media::plugin())?;
+            #[cfg(desktop)]
+            if let Some(window) = app.get_webview_window("main") {
+                app.state::<AppState>().media.attach(&window);
+            }
 
             let handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -67,6 +78,8 @@ pub fn run() {
             commands::list_recent,
             commands::get_favicon,
             commands::local_weather,
+            commands::watch_media,
+            commands::show_media,
             commands::play,
             commands::stop,
             commands::set_volume,

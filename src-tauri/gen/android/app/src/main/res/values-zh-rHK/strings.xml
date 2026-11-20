@@ -1,0 +1,8 @@
+<resources>
+    <string name="playback_channel">播放中</string>
+    <string name="playback_channel_description">收音機正在播放的內容及控制</string>
+    <string name="action_previous">上一個電臺</string>
+    <string name="action_play">播放</string>
+    <string name="action_stop">停止</string>
+    <string name="action_next">下一個電臺</string>
+</resources>

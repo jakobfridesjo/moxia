@@ -5,7 +5,7 @@ import type { CountryCode, LocalWeather, Station } from "@/shared/api/commands.t
 import { localWeatherQuery } from "@/shared/api/queries.ts";
 import { environmentAtom } from "@/shared/config/preferences.ts";
 import { placeNightAtom } from "@/shared/lib/night.ts";
-import { glowAt, isNightAt, placeOf, sunAltitude } from "@/pages/radio/lib/sun.ts";
+import { glowAt, isNightAt, moonLit, placeOf, sunAltitude } from "@/pages/radio/lib/sun.ts";
 
 /** The sun moves a quarter of a degree a minute, so the painting looks again each minute. */
 const SUN_MS = 60_000;
@@ -14,6 +14,8 @@ const SUN_MS = 60_000;
 export interface LocalSky {
   weather: LocalWeather | null;
   glow: number;
+  /** How much of the moon is lit, 0 at new moon to 1 at full. */
+  moon: number;
 }
 
 /**
@@ -35,5 +37,9 @@ export function useLocalSky(region: CountryCode, station: Station | null): Local
   }, [night]);
   useEffect(() => () => placeNightAtom.set(null), []);
   const { data } = useQuery({ ...localWeatherQuery(latitude, longitude), enabled: environment });
-  return { weather: environment ? (data ?? null) : null, glow: glowAt(altitude) };
+  return {
+    weather: environment ? (data ?? null) : null,
+    glow: glowAt(altitude),
+    moon: moonLit(now),
+  };
 }
