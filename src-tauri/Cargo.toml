@@ -1,0 +1,64 @@
+[package]
+name = "moxia"
+description = "Chinese-language radio for desktop and Android"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[workspace]
+members = ["radio-core"]
+
+[workspace.package]
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+rust-version = "1.91"
+publish = false
+
+[workspace.dependencies]
+chrono = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+
+# Clippy's default lints are errors, with or without the Git hooks.
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+
+[lints]
+workspace = true
+
+[lib]
+name = "moxia_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+serde.workspace = true
+log = "0.4"
+tauri = { version = "2.12.5", features = [] }
+tauri-plugin-log = "2.10.1"
+chrono = { workspace = true, features = ["serde"] }
+radio-core = { path = "radio-core" }
+
+# Audio decoding and, later, speech recognition are far too slow unoptimized;
+# dependencies build optimized even in `mise desktop`.
+[profile.dev.package."*"]
+opt-level = 3
+
+# Smaller and slightly faster, at the cost of slower release builds. opt-level
+# stays at 3, since audio decoding and neural networks run on the CPU, and
+# panics stay unwinding, so one in a command becomes an error, not a crash.
+[profile.release]
+lto = true
+codegen-units = 1
+# Keeps debug symbols out of the shipped library, which they would otherwise make several times larger.
+strip = true
+
+# Release, with the symbols a profiler needs to name functions.
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = false

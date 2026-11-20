@@ -1,0 +1,71 @@
+[package]
+name = "radio-core"
+description = "Finds Chinese-language radio stations and plays their streams"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+chrono = { workspace = true, features = ["serde"] }
+log = "0.4"
+# Plays decoded audio on the default output device; decoding is symphonia's.
+rodio = { version = "0.23", default-features = false, features = ["playback"] }
+# rusqlite_migration 2.6 is built against rusqlite 0.40.
+rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite_migration = "2.6"
+serde = { workspace = true, features = ["rc"] }
+serde_json = "1.0"
+sha2 = "0.10"
+# The codecs Chinese stations broadcast in: MP3 and AAC, over plain HTTP or HLS, and a few Ogg Vorbis and FLAC.
+symphonia = { version = "0.6", default-features = false, features = [
+  "aac",
+  "mp3",
+  "ogg",
+  "vorbis",
+  "flac",
+  "id3v2",
+] }
+thiserror = "2.0"
+# Runs the subtitle models' ONNX graphs.
+tract-onnx = "0.23.10"
+# Keeps a loaded graph in tract's own format, which loads much faster than ONNX.
+tract-nnef = "0.23.10"
+# Runs the same graphs on a Vulkan, Metal or Direct3D 12 GPU when there is one.
+tract-wgpu = "0.23.10"
+# tract's own kernels; `multithread-mm` lets them split matrix products over every core.
+tract-linalg = { version = "0.23.10", features = ["multithread-mm"] }
+# opus-mt's tokenizer, built from source (needs cmake).
+sentencepiece = "0.13"
+# The FFT under the filterbanks the subtitle models take.
+realfft = "3.5"
+# Talks to radio-browser and fetches streams over HTTPS (rustls, Mozilla's root certificates).
+ureq = "3"
+# Writes subtitles in traditional characters (OpenCC's rules, in pure Rust).
+ferrous-opencc = { version = "0.4", default-features = false, features = ["s2t-conversion"] }
+# Stream titles from stations that send GBK or Big5.
+encoding_rs = "0.8"
+url = "2"
+# Listening together: peer-to-peer QUIC dialled by public key (hole punching, relays when it fails),
+# and gossip rooms over it.
+iroh = "1.4"
+iroh-gossip = "0.102"
+# The async runtime iroh runs on; Tauri's commands already run on it.
+tokio = { version = "1.54.1", features = ["sync", "rt", "macros", "time"] }
+# The `Stream` a gossip room's events arrive on.
+n0-future = "0.3.2"
+# A fresh room's topic.
+getrandom = "0.3"
+# Draws an invite as a QR code; the frontend paints its modules.
+qrcode = { version = "0.14", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+# The room test runs two listeners at once.
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }

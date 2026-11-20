@@ -1,0 +1,276 @@
+[settings]
+experimental = true
+lockfile = true
+minimum_release_age = "3d"
+
+[tools]
+node = "26.13.0"
+pnpm = "12.18.0"
+rust = { version = "1.99.1", components = "rustfmt,clippy" }
+
+hk = "2.11.1"
+pkl = "0.33.0"
+"github:EmbarkStudios/cargo-about" = "0.9.3"
+
+[env]
+HK_MISE = 1
+
+# The Android tasks bring their own tools, installed on first run: Gradle needs a
+# JDK, Tauri the SDK and the NDK (`mise android:sdk` installs this version).
+[vars]
+ndk = "29.0.14206865"
+
+[deps.web]
+auto = true
+description = "Install web dependencies"
+sources = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]
+outputs = ["node_modules/"]
+run = "pnpm install --frozen-lockfile"
+
+[deps.licenses]
+auto = true
+description = "Collect the third-party licence notices the About page shows"
+depends = ["web"]
+sources = [
+  "mise.toml",
+  "pnpm-lock.yaml",
+  "src-tauri/Cargo.lock",
+  "src-tauri/about.toml",
+]
+outputs = ["src/pages/about/model/third-party-licenses.gen.json"]
+run = "mise run --no-deps licenses:generate"
+
+# The rest of `mise setup`. Without `auto`, these run only on `mise deps`, not
+# before every task; `--no-deps` keeps their tasks from re-entering `mise deps`.
+[deps.env]
+description = "Create local env files"
+outputs = [".env.local", "mise.local.toml"]
+run = "mise run --no-deps env:init"
+
+[deps.skills]
+description = "Restore project skills and link the active tools' skills"
+sources = ["skills-lock.json", "mise.lock"]
+outputs = [".agents/skills/"]
+run = "mise run --no-deps skills:install"
+
+[deps.hooks]
+description = "Install hk Git hooks"
+outputs = [".git/hooks/pre-commit", ".git/hooks/pre-push"]
+run = "mise run --no-deps hooks:install"
+
+[deps.browsers]
+description = "Install Chromium for frontend tests"
+depends = ["web"]
+# The lockfile pins Playwright, which pins the browser build.
+sources = ["pnpm-lock.yaml"]
+run = "mise run --no-deps test:web:browsers"
+
+[tasks."desktop"]
+description = "Start the Tauri desktop app with the Vite dev server"
+env = { _.file = { path = ".env.local", redact = true } }
+run = "pnpm tauri:dev"
+
+[tasks."desktop:build"]
+description = "Build the Tauri desktop app and its installers (.deb and .rpm on Linux, in src-tauri/target/release/bundle/)"
+run = "pnpm tauri:build"
+
+[tasks."desktop:build:mac"]
+description = "Build the macOS app and DMG on a Mac, ad-hoc signed (src-tauri/target/release/bundle/)"
+run = """
+set -e
+[ "$(uname)" = Darwin ] || { echo "Tauri builds macOS apps only on a Mac." >&2; exit 1; }
+xcode-select -p > /dev/null 2>&1 || { echo "Install the Xcode Command Line Tools: xcode-select --install" >&2; exit 1; }
+command -v cmake > /dev/null || { echo "Install CMake (brew install cmake): SentencePiece builds with it." >&2; exit 1; }
+pnpm tauri build --bundles app,dmg --config src-tauri/tauri.build.conf.json
+"""
+
+[tasks."android:sdk"]
+description = "Install the Android NDK and platform tools into the mise Android SDK"
+tools = { java = "temurin-21.0.13+9.0.LTS", android-sdk = "20.0" }
+run = """
+set -e
+[ -d "$ANDROID_HOME/ndk/{{vars.ndk}}" ] && [ -d "$ANDROID_HOME/platform-tools" ] && exit 0
+yes | sdkmanager --licenses > /dev/null
+sdkmanager --install platform-tools "ndk;{{vars.ndk}}"
+"""
+
+[tasks."android:keystore"]
+description = "Create the key that signs release APKs, kept in ~/.android outside the repo"
+dir = "src-tauri/gen/android"
+tools = { java = "temurin-21.0.13+9.0.LTS" }
+run = """
+set -e
+[ -f keystore.properties ] && exit 0
+umask 077
+store="$HOME/.android/moxia-release.jks"
+mkdir -p "$(dirname "$store")"
+export KEYSTORE_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')"
+keytool -genkeypair -keystore "$store" -alias release -keyalg RSA -keysize 4096 -validity 10000 \
+  -storepass:env KEYSTORE_PASSWORD -keypass:env KEYSTORE_PASSWORD -dname "CN=Moxia"
+printf 'password=%s\\nkeyAlias=release\\nstoreFile=%s\\n' "$KEYSTORE_PASSWORD" "$store" > keystore.properties
+"""
+
+[tasks."android:build"]
+description = "Build a signed release APK for arm64 phones"
+depends = ["android:sdk", "android:keystore"]
+tools = { java = "temurin-21.0.13+9.0.LTS", android-sdk = "20.0", rust = { version = "1.99.1", targets = "aarch64-linux-android" } }
+run = """
+# Tauri finds the NDK through NDK_HOME.
+export NDK_HOME="$ANDROID_HOME/ndk/{{vars.ndk}}"
+# CMake (SentencePiece) finds the NDK by this name.
+export ANDROID_NDK_ROOT="$NDK_HOME"
+pnpm tauri android build --apk --target aarch64 --config src-tauri/tauri.build.conf.json
+"""
+
+[tasks."android:install"]
+description = "Install the release APK on the phone adb is connected to (pair over Wi-Fi with `adb pair`)"
+dir = "src-tauri/gen/android/app/build/outputs/apk"
+tools = { android-sdk = "20.0" }
+run = "adb install -r universal/release/app-universal-release.apk"
+
+[tasks."licenses:generate"]
+description = "Collect the licence notices of every Rust crate and npm package the app ships, for the About page"
+run = '''
+cargo fetch --locked --quiet --manifest-path src-tauri/Cargo.toml
+node --input-type=module <<'SCRIPT'
+import { execFileSync } from "node:child_process";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+const run = (command, args) => execFileSync(command, args, { encoding: "utf8", maxBuffer: 1 << 28 });
+const notices = new Map();
+const add = (license, text, name) => {
+  const key = `${license}\0${text}`;
+  const notice = notices.get(key) ?? notices.set(key, { license, text, packages: new Set() }).get(key);
+  notice.packages.add(name);
+};
+
+// Rust: every crate linked into the app on each platform it ships on (src-tauri/about.toml).
+const rust = JSON.parse(
+  run("cargo-about", ["generate", "--format", "json", "--frozen", "--manifest-path", "src-tauri/Cargo.toml"]),
+);
+for (const { id, text, used_by } of rust.licenses) {
+  for (const { crate } of used_by) add(id, text.trim(), `${crate.name} ${crate.version}`);
+}
+
+// npm: the runtime dependencies. `shadcn` is a CLI the app takes only a stylesheet from.
+const cliOnly = new Set(["shadcn"]);
+const seen = new Set();
+const visit = (dependencies = {}) => {
+  for (const [name, { version, path, dependencies: children }] of Object.entries(dependencies)) {
+    if (seen.has(path)) continue;
+    seen.add(path);
+    const manifest = JSON.parse(readFileSync(join(path, "package.json"), "utf8"));
+    const files = readdirSync(path).filter((file) => /^(licen[cs]e|copying|notice|ofl)/i.test(file)).sort();
+    const text = files.map((file) => readFileSync(join(path, file), "utf8").trim()).join("\n\n");
+    add(manifest.license ?? "UNKNOWN", text, `${name} ${version}`);
+    if (!cliOnly.has(name)) visit(children);
+  }
+};
+visit(JSON.parse(run("pnpm", ["list", "--prod", "--json", "--depth", "Infinity"]))[0].dependencies);
+
+const collator = new Intl.Collator("en");
+const list = [...notices.values()]
+  .map(({ license, text, packages }) => ({ license, text, packages: [...packages].sort(collator.compare) }))
+  .sort((a, b) => collator.compare(a.license, b.license) || collator.compare(a.packages[0], b.packages[0]));
+writeFileSync("src/pages/about/model/third-party-licenses.gen.json", JSON.stringify(list) + "\n");
+console.log(`${list.length} notices for ${list.reduce((sum, n) => sum + n.packages.length, 0)} packages`);
+SCRIPT
+'''
+
+[tasks."art:ink"]
+description = "Cut the ink out of the CC0 paintings in src/pages/radio/ui/ink/cutouts.json into WebP layers (pass names to redo only those)"
+run = "node scripts/ink-cutouts.ts"
+
+[tasks."env:init"]
+description = "Create local env files if missing"
+run = """
+[ -f .env.local ] || cp .env.example .env.local
+# Holds tokens, so create it unreadable to anyone else from the start.
+[ -f mise.local.toml ] || { cp mise.local.toml.example mise.local.toml && chmod 600 mise.local.toml; }
+"""
+
+[tasks."setup"]
+description = "Run every stale `[deps]` provider (env files, dependencies, skills, git hooks, test browser)"
+run = "mise deps"
+
+[tasks."hooks:install"]
+description = "Install hk Git hooks for pre-commit and pre-push"
+# `--legacy --force`: on Git 2.54+ hk defaults to config-based hooks that leave
+# `.git/hooks` untouched, so leftover shims there would keep firing alongside.
+run = "hk install --mise --legacy --force"
+
+[tasks."skills:install"]
+description = "Install project skills from skills-lock.json and link the active tools' skills"
+dir = "{{config_root}}"
+run = ["pnpx skills experimental_install -y", "mise skills sync"]
+
+# `skills update` skips a skill whose upstream still matches the lock, even when
+# the copy on disk differs; `--force` reinstalls every locked skill from upstream.
+[tasks."skills:update"]
+description = "Reinstall project skills from upstream and record their new hashes in skills-lock.json"
+dir = "{{config_root}}"
+run = ["pnpx skills experimental_install -y --force", "mise skills sync"]
+
+[tasks."audit"]
+description = "Audit production web dependencies (fails on high/critical)"
+run = "pnpm audit --prod --audit-level high"
+
+[tasks."test:web:browsers"]
+description = "Install Chromium for frontend tests (pass --with-deps on fresh Linux/WSL)"
+run = "pnpm exec playwright install chromium"
+
+[tasks."test"]
+description = "Run Rust core tests, then frontend tests with coverage"
+depends = ["test:rust"]
+run = "pnpm test:coverage"
+
+[tasks."test:web"]
+description = "Run frontend tests with coverage"
+run = "pnpm test:coverage"
+
+# Only the core crate: it has no webview dependency, so it builds outside the Tauri toolchain too.
+[tasks."test:rust"]
+description = "Run the Rust core tests (directory, stations, storage, stream parsing)"
+dir = "src-tauri"
+run = "cargo test -p radio-core"
+
+[tasks."perf:web"]
+description = "Measure frame times, main-thread load, React renders and hot functions on the radio, in headless Chromium (test-results/perf/)"
+env = { PERF = "1" }
+run = [
+  "pnpm exec vitest run --project perf",
+  "cat test-results/perf/report.txt",
+]
+
+[tasks."bench:subtitles"]
+description = "Time loading the subtitle models and transcribing a recording (default: the newest tape)"
+dir = "src-tauri"
+usage = '''
+arg "[tape]" help="An .aac or .mp3 recording"
+'''
+run = '''
+set -e
+data="${XDG_DATA_HOME:-$HOME/.local/share}/io.github.jakobfridesjo.moxia"
+tape="${usage_tape:-$(ls -t "$data"/tapes/*.aac "$data"/tapes/*.mp3 2>/dev/null | head -n 1)}"
+[ -n "$tape" ] || { echo "No tape to transcribe: record one, or pass a path." >&2; exit 1; }
+models="$(ls -d "$data"/models/subtitles-* 2>/dev/null | head -n 1)"
+[ -n "$models" ] || { echo "Download subtitles in the app's Settings first." >&2; exit 1; }
+cargo run --quiet --profile profiling -p radio-core --example subtitles -- "$models" "$tape"
+'''
+
+[tasks."fsd"]
+description = "Check Feature-Sliced Design structure"
+run = "pnpm exec steiger ./src"
+
+[tasks."check"]
+description = "Run lint, format, and typecheck checks via hk"
+run = "hk check --all"
+
+[tasks."fix"]
+description = "Auto-fix lint and formatting issues via hk"
+run = "hk fix --all"
+
+[tasks."check:push"]
+description = "Run the pre-push checks on everything this branch adds over origin/main, without pushing"
+run = ["git fetch --quiet origin main", "hk run pre-push --pr"]

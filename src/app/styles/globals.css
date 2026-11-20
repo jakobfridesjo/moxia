@@ -1,0 +1,316 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/ibm-plex-sans";
+@import "lxgw-wenkai-webfont/lxgwwenkai-regular.css";
+@import "lxgw-wenkai-webfont/lxgwwenkai-bold.css";
+@import "@fontsource/lxgw-wenkai-tc/400.css";
+@import "@fontsource/lxgw-wenkai-tc/700.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* `.dark` on the root is the night look (`shared/lib/night.ts`): dark paper and pale ink. */
+
+/* The ink radio: rice paper, ink and the red of a seal. Every page is painted from these. */
+:root {
+  --paper: oklch(0.956 0.011 85);
+  --ink: oklch(0.22 0.012 60);
+  --ink-soft: oklch(0.42 0.012 60);
+  --seal: oklch(0.52 0.19 28);
+  /* The gold caps on the ends of the scroll's roller. */
+  --gilt: oklch(0.8 0.13 85);
+
+  /* Controls paint --background, so the page canvas is its own token. */
+  --canvas: var(--paper);
+  --background: oklch(0.975 0.008 85);
+  --foreground: var(--ink);
+  /* Cards are a lighter sheet laid on the paper. */
+  --card: oklch(0.985 0.006 85 / 0.7);
+  --card-foreground: var(--ink);
+  --popover: oklch(0.975 0.008 85);
+  --popover-foreground: var(--ink);
+  --primary: var(--seal);
+  --primary-foreground: var(--paper);
+  --primary-text: var(--seal);
+  --secondary: color-mix(in oklch, var(--ink) 6%, transparent);
+  --secondary-foreground: var(--ink);
+  /* Hover, pressed and subtle fills are washes of ink, so the paper shows through them. */
+  --muted: color-mix(in oklch, var(--ink) 6%, transparent);
+  --muted-foreground: var(--ink-soft);
+  --accent: color-mix(in oklch, var(--ink) 10%, transparent);
+  --accent-foreground: var(--ink);
+  --destructive: var(--seal);
+  --border: color-mix(in oklch, var(--ink) 15%, transparent);
+  --input: color-mix(in oklch, var(--ink) 20%, transparent);
+  --ring: color-mix(in oklch, var(--seal) 60%, transparent);
+  /* Seals and paper are cut square; corners only just soften. */
+  --radius: 0.25rem;
+  --sidebar: var(--paper);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--seal);
+  --sidebar-primary-foreground: var(--paper);
+  --sidebar-accent: color-mix(in oklch, var(--ink) 10%, transparent);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: color-mix(in oklch, var(--ink) 15%, transparent);
+  --sidebar-ring: color-mix(in oklch, var(--seal) 60%, transparent);
+  /* Jade and ochre, the other pigments of a painting. */
+  --success: oklch(0.5 0.08 160);
+  --success-foreground: var(--paper);
+  --warning: oklch(0.62 0.11 70);
+  --warning-foreground: var(--ink);
+}
+
+/* Night: paper inked black as for a rubbing, the writing pale, the seals a brighter red to hold against the dark. */
+.dark {
+  --paper: oklch(0.2 0.01 60);
+  --ink: oklch(0.9 0.035 80);
+  --ink-soft: oklch(0.7 0.03 75);
+  --seal: oklch(0.6 0.18 30);
+  --background: oklch(0.18 0.01 60);
+  --card: oklch(0.25 0.012 60 / 0.7);
+  --popover: oklch(0.23 0.012 60);
+  --success: oklch(0.65 0.09 160);
+  --warning: oklch(0.72 0.11 70);
+  --warning-foreground: var(--paper);
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-primary-text: var(--primary-text);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --font-calligraphy:
+    "LXGW WenKai", "LXGW WenKai TC", "STKaiti", "Kaiti SC", "KaiTi", "AR PL UKai CN",
+    "AR PL UKai TW";
+  --font-sans: "IBM Plex Sans Variable", var(--font-calligraphy), sans-serif;
+  --font-serif:
+    ui-serif, Georgia, Cambria, "Times New Roman", Times, var(--font-calligraphy), serif;
+  --font-heading: var(--font-brush);
+  --font-brush: var(--font-calligraphy), serif;
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-seal: var(--seal);
+  --color-gilt: var(--gilt);
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-editor: 0.8125rem;
+  --text-editor--line-height: 1.25rem;
+  --text-kpi: 1.75rem;
+  --text-kpi--line-height: 1;
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@utility font-heading {
+  font-family: var(--font-heading);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground select-none;
+  }
+  input,
+  textarea,
+  [contenteditable="true"] {
+    @apply select-text;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* Menus are solid, so the text they cover does not show through. */
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="select-content"] {
+  @apply animate-none! bg-popover **:data-[slot$=-separator]:bg-foreground/5 **:data-[variant=destructive]:focus:bg-foreground/10! **:data-[variant=destructive]:text-accent-foreground! **:data-[variant=destructive]:**:text-accent-foreground!;
+}
+
+/* The drawer floats over the page like a menu: solid, with the card's ring instead of a border. */
+[data-slot="drawer-popup"] {
+  @apply border-transparent bg-popover text-popover-foreground ring-1 ring-foreground/5 dark:border-transparent dark:ring-foreground/10;
+}
+[data-slot="drawer-swipe-handle"] {
+  @apply after:bg-foreground/25;
+}
+
+/* An empty state's icon takes the same accent wash, so it reads as the theme's colour, not grey. */
+[data-slot="empty-icon"][data-variant="icon"] {
+  @apply bg-sidebar-primary/18 text-primary-text;
+}
+
+/* Toggles mark the chosen option like the sidebar marks the current page: a wash of the accent. */
+[data-slot="toggle"],
+[data-slot="toggle-group-item"] {
+  @apply aria-pressed:border-primary-text/40 aria-pressed:bg-sidebar-primary/18 aria-pressed:text-primary-text;
+}
+
+/* The calendar marks its range the same way: chosen ends washed and outlined, the days between washed. */
+[data-slot="calendar"] {
+  .rdp-range_start,
+  .rdp-range_end,
+  .rdp-range_start::after,
+  .rdp-range_end::after {
+    @apply bg-sidebar-primary/10;
+  }
+  [data-range-start="true"],
+  [data-range-end="true"],
+  [data-selected-single="true"] {
+    @apply border border-primary-text/40 bg-sidebar-primary/18 text-primary-text;
+  }
+  [data-range-middle="true"] {
+    @apply bg-transparent text-primary-text;
+  }
+  .rdp-range_middle {
+    @apply bg-sidebar-primary/10;
+  }
+}
+
+/* Navigation links mark the current page like the sidebar does: the accent wash, not opaque grey. */
+[data-slot="navigation-menu-link"] {
+  &:focus {
+    background: transparent;
+  }
+  &:hover,
+  &:focus-visible,
+  &[aria-expanded="true"],
+  &[data-active] {
+    background: var(--sidebar-accent);
+    color: var(--sidebar-accent-foreground);
+  }
+}
+
+/* TanStack Charts: the SVG is the tab stop and its ChartCard paints the focus ring. */
+.ts-chart:focus-visible {
+  outline: none;
+}
+.ts-chart-host {
+  --ts-chart-focus-fill: var(--color-background);
+}
+
+/* Toasts are floating surfaces like popovers: Rhea's radius, ring and shadow
+   instead of Sonner's border, and its own type, buttons and close button.
+   Selectors repeat Sonner's attributes to outrank its stylesheet. */
+[data-sonner-toaster].toaster {
+  @apply font-sans;
+}
+[data-sonner-toast][data-styled="true"].cn-toast {
+  @apply rounded-3xl border-transparent text-sm shadow-lg ring-1 ring-foreground/5 dark:ring-foreground/10;
+}
+[data-sonner-toast][data-styled="true"].cn-toast [data-description] {
+  @apply text-muted-foreground;
+}
+[data-sonner-toast][data-styled="true"].cn-toast [data-button] {
+  @apply rounded-2xl bg-primary px-2.5 text-xs text-primary-foreground transition-colors hover:bg-primary/80;
+}
+[data-sonner-toast][data-styled="true"].cn-toast [data-cancel] {
+  @apply bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)];
+}
+[data-sonner-toast][data-styled="true"].cn-toast [data-close-button] {
+  @apply border-transparent bg-popover text-popover-foreground shadow-sm ring-1 ring-foreground/5 dark:ring-foreground/10;
+}
+[data-sonner-toast][data-styled="true"].cn-toast:hover [data-close-button]:hover {
+  @apply border-transparent bg-muted text-foreground;
+}
+
+/* Sonner draws every toast icon in the toast's text color, so a failure reads
+   the same as a success. Tint the icon per type using the app's tokens. */
+.cn-toast[data-type="success"] [data-icon] {
+  color: var(--success);
+}
+.cn-toast[data-type="warning"] [data-icon] {
+  color: var(--warning);
+}
+.cn-toast[data-type="error"] [data-icon] {
+  color: var(--destructive);
+}
+
+/* The hanging scroll unrolling from its roller as the path opens. */
+@keyframes scroll-unroll {
+  to {
+    translate: 0 102%;
+  }
+}
+
+/* A slip held, or waiting for the old man's cane. */
+@keyframes slip-flutter {
+  0%,
+  100% {
+    rotate: 0deg;
+  }
+  25% {
+    rotate: 2deg;
+  }
+  75% {
+    rotate: -2deg;
+  }
+}
+
+/* The old man's cane breaks a slip: its pieces fall apart and settle. */
+@keyframes shard-break {
+  to {
+    translate: var(--shard-x) var(--shard-y);
+    rotate: var(--shard-turn);
+  }
+}
+
+/* The broken pieces fade away while a tap can still mend them. */
+@keyframes fade-away {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Mended: the pieces fly back together. */
+@keyframes shard-mend {
+  from {
+    translate: var(--shard-x) var(--shard-y);
+    rotate: var(--shard-turn);
+    opacity: 0.3;
+  }
+}
+
+/* Ink soaking up a seal held down long enough to store. */
+@keyframes seal-rise {
+  from {
+    scale: 1 0;
+  }
+}

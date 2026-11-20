@@ -1,0 +1,144 @@
+import React from "react";
+import { ArrowLeft, MoreHorizontal } from "lucide-react";
+
+import { Button } from "@/shared/ui/shadcn/button.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/shared/ui/shadcn/dropdown-menu.tsx";
+import { TooltipIconButton } from "@/shared/ui/TooltipIconButton.tsx";
+import { useIsMobile } from "@/shared/lib/use-mobile.ts";
+import { useMessages } from "@/shared/i18n/messages.ts";
+import { cn } from "@/shared/lib/class-names.ts";
+
+interface PageHeaderProps {
+  title: React.ReactNode;
+  /** Renders a back arrow to the left of the title. */
+  onBack?: () => void;
+  backLabel?: string;
+  /** Centered between the title and the actions, e.g. a search box; below the title on phones. */
+  center?: React.ReactNode;
+  /** Keeps `center` in the row on phones too: for a compact picker, not a search box. */
+  centerInline?: boolean;
+  /** The page's main action: stays beside the title on phones instead of folding into the menu. */
+  action?: React.ReactNode;
+  children?: React.ReactNode;
+}
+
+function BackButton({ onBack, backLabel }: { onBack: () => void; backLabel: string }) {
+  return (
+    <TooltipIconButton label={backLabel} variant="ghost" size="icon" onClick={onBack}>
+      <ArrowLeft />
+    </TooltipIconButton>
+  );
+}
+
+/**
+ * Whether the actions fit inline beside the title. Their width is remembered
+ * while inline, so once collapsed they expand again as soon as there is room.
+ */
+function useActionsFit(enabled: boolean) {
+  const rowRef = React.useRef<HTMLDivElement>(null);
+  const titleRef = React.useRef<HTMLDivElement>(null);
+  const centerRef = React.useRef<HTMLDivElement>(null);
+  const actionsRef = React.useRef<HTMLDivElement>(null);
+  const actionsWidth = React.useRef(0);
+  const [fits, setFits] = React.useState(true);
+
+  React.useLayoutEffect(() => {
+    const row = rowRef.current;
+    const title = titleRef.current;
+    if (!enabled || !row || !title) return;
+
+    const measure = () => {
+      if (actionsRef.current) actionsWidth.current = actionsRef.current.offsetWidth;
+      const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0;
+      const center = centerRef.current;
+      const room = center
+        ? (row.clientWidth - center.offsetWidth) / 2 - gap
+        : row.clientWidth - title.offsetWidth - gap;
+      setFits(actionsWidth.current <= room);
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    observer.observe(title);
+    if (centerRef.current) observer.observe(centerRef.current);
+    if (actionsRef.current) observer.observe(actionsRef.current);
+    return () => observer.disconnect();
+  }, [enabled, fits]);
+
+  return { rowRef, titleRef, centerRef, actionsRef, fits };
+}
+
+function ActionsMenu({ children }: { children: React.ReactNode }) {
+  const m = useMessages();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="ml-auto" />}>
+        <MoreHorizontal className="size-5" />
+        <span className="sr-only">{m.common.actions}</span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-auto">
+        <div className="flex min-w-max flex-col gap-1 p-1 [&>div]:w-full [&>div]:flex-col! [&>div]:items-stretch! [&>div]:gap-1 **:[[role=group]]:flex-col! **:[[role=group]]:items-stretch! **:[[role=group]]:gap-1 **:[[role=group]>*]:rounded-m! **:[[role=group]>*]:border! **:data-[slot=button]:justify-start">
+          {children}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export function PageHeader({
+  title,
+  onBack,
+  backLabel,
+  center,
+  centerInline = false,
+  action,
+  children,
+}: PageHeaderProps) {
+  const m = useMessages();
+  const isMobile = useIsMobile();
+  const hasActions = Boolean(children);
+  const { rowRef, titleRef, centerRef, actionsRef, fits } = useActionsFit(hasActions && !isMobile);
+  const collapsed = isMobile || !fits;
+  const centered = Boolean(center) && (centerInline || !isMobile);
+
+  return (
+    <div className="mb-1.5 flex shrink-0 flex-col gap-3 sm:min-h-10 sm:justify-center">
+      <div
+        ref={rowRef}
+        className={cn(
+          "flex min-h-10 items-center justify-between gap-3",
+          centered && "grid grid-cols-[1fr_auto_1fr]"
+        )}
+      >
+        <div ref={titleRef} className="flex min-w-0 items-center gap-2">
+          {onBack && <BackButton onBack={onBack} backLabel={backLabel ?? m.common.back} />}
+          <div className="min-w-0 text-lg font-medium">{title}</div>
+        </div>
+        {centered && (
+          <div ref={centerRef} className="flex items-center gap-2">
+            {center}
+          </div>
+        )}
+        {(hasActions || action) && (
+          <div className="flex min-w-0 items-center justify-end gap-2">
+            {hasActions &&
+              (collapsed ? (
+                <ActionsMenu>{children}</ActionsMenu>
+              ) : (
+                <div ref={actionsRef} className="flex w-max shrink-0 items-center gap-2">
+                  {children}
+                </div>
+              ))}
+            {action}
+          </div>
+        )}
+      </div>
+      {center && !centered && <div className="flex flex-wrap items-center gap-2">{center}</div>}
+    </div>
+  );
+}
