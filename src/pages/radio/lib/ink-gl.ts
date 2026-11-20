@@ -49,6 +49,8 @@ interface ImageDraw {
   alpha: number;
   /** A canvas lying over the whole target whose alpha the image is kept to. */
   within?: Source;
+  /** Soft all over, like mist, so it may be worked out at a share of the target's resolution. */
+  soft?: boolean;
 }
 
 interface BloomDraw {
@@ -132,6 +134,8 @@ export interface InkGL {
 const SOFT_SCALE = 0.5;
 /** Clear pixels kept around what a flush draws, wider than drawing it up ever reaches. */
 const MARGIN = 2;
+/** Texels drawn past the corner soft things take of a canvas kept at the target's size, so drawing them up reaches what lies beyond their edge, not clear canvas. */
+const SPARE = 1;
 /** Left, top, right and bottom, in the target's pixels. */
 type Edges = [number, number, number, number];
 const NOWHERE: Edges = [Infinity, Infinity, -Infinity, -Infinity];
@@ -290,8 +294,11 @@ function compile(gl: WebGL2RenderingContext, fragment: string): Program | null {
   return { program, uniforms: new Map() };
 }
 
-/** A renderer of its own, drawing on a canvas no one sees; null without WebGL2. */
-export function createInkGL(): InkGL | null {
+/**
+ * A renderer of its own, drawing on a canvas no one sees; null without WebGL2. `software` says
+ * whether its WebGL runs on the CPU, where that is known better than the renderer's name tells.
+ */
+export function createInkGL({ software: assumed }: { software?: boolean } = {}): InkGL | null {
   const canvas = document.createElement("canvas");
   const gl = canvas.getContext("webgl2", {
     alpha: true,
@@ -346,7 +353,7 @@ export function createInkGL(): InkGL | null {
   const rendererName = String(
     gl.getParameter(debug ? debug.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? ""
   );
-  const software = /swiftshader|llvmpipe|softpipe|software/i.test(rendererName);
+  const software = assumed ?? /swiftshader|llvmpipe|softpipe|software/i.test(rendererName);
 
   canvas.addEventListener("webglcontextlost", (event) => {
     event.preventDefault();
@@ -605,7 +612,10 @@ export function createInkGL(): InkGL | null {
   };
 
   const soft = (draw: Draw): boolean =>
-    draw.kind === "mist" || draw.kind === "glow" || draw.kind === "falls";
+    draw.kind === "mist" ||
+    draw.kind === "glow" ||
+    draw.kind === "falls" ||
+    (draw.kind === "image" && draw.draw.soft === true);
 
   const add = (draw: Draw) => (collecting ?? queue).push(draw);
 
@@ -617,18 +627,23 @@ export function createInkGL(): InkGL | null {
       }
   };
 
-  const flush: InkGL["flush"] = (ctx) => {
-    if (!queue.length) return;
-    const draws = queue;
-    queue = [];
-    if (lost || disposed) return;
+  /** Draws `draws` onto `ctx`'s canvas in one go, giving the part of it they were laid on, if any. */
+  const lay = (ctx: CanvasRenderingContext2D, draws: Draw[]): Edges | null => {
     flushes += 1;
     const target: [number, number] = [ctx.canvas.width, ctx.canvas.height];
     const scale = draws.every(soft) ? SOFT_SCALE : 1;
     const width = Math.max(1, Math.ceil(target[0] * scale));
     const height = Math.max(1, Math.ceil(target[1] * scale));
-    if (canvas.width !== width || canvas.height !== height)
-      Object.assign(canvas, { width, height });
+    // On the CPU every pixel of the canvas is read back, so it is no bigger than what is drawn.
+    // On a GPU it keeps the target's size, as making it anew costs more than its unused part:
+    // soft things take its top left corner, with texels to spare past their edge.
+    const [fullWidth, fullHeight] = software ? [width, height] : target;
+    if (canvas.width !== fullWidth || canvas.height !== fullHeight)
+      Object.assign(canvas, { width: fullWidth, height: fullHeight });
+    const spare = width + SPARE <= fullWidth && height + SPARE <= fullHeight ? SPARE : 0;
+    const [across, down] = [width + spare, height + spare];
+    /** The target as wide as all that is drawn, spare texels too, in its own pixels. */
+    const reached: [number, number] = [(target[0] * across) / width, (target[1] * down) / height];
     // Only what the draws reach is laid on the target, with a margin of clear pixels so it is
     // drawn up just as the whole canvas would be. All of it is cleared: drawing up may reach a
     // texel past the part laid.
@@ -638,11 +653,11 @@ export function createInkGL(): InkGL | null {
     const y0 = Math.max(0, Math.floor(top * ky) - MARGIN);
     const x1 = Math.min(width, Math.ceil(right * kx) + MARGIN);
     const y1 = Math.min(height, Math.ceil(bottom * ky) + MARGIN);
-    if (x1 <= x0 || y1 <= y0) return;
-    gl.viewport(0, 0, width, height);
+    if (x1 <= x0 || y1 <= y0) return null;
+    gl.viewport(0, fullHeight - down, across, down);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    for (const draw of draws) render(draw, target);
+    for (const draw of draws) render(draw, reached);
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
@@ -662,6 +677,80 @@ export function createInkGL(): InkGL | null {
     );
     ctx.restore();
     if (flushes % 60 === 0) sweep();
+    return [
+      Math.floor(x0 / kx),
+      Math.floor(y0 / ky),
+      Math.min(target[0], Math.ceil(x1 / kx)),
+      Math.min(target[1], Math.ceil(y1 / ky)),
+    ];
+  };
+
+  /** Room the size of the target, kept clear, to cut light by the ink in without the GPU. */
+  const cutting = document.createElement("canvas");
+
+  /**
+   * Soft light behind `ink`, on the CPU: worked out at a share of the resolution like any soft
+   * thing, then cut by the ink in 2D at the target's own, so the cut stays as sharp as the ink.
+   */
+  const layBehind = (ctx: CanvasRenderingContext2D, ink: Source, draws: Draw[]) => {
+    const { width, height } = ctx.canvas;
+    if (cutting.width !== width || cutting.height !== height)
+      Object.assign(cutting, { width, height });
+    const cut = cutting.getContext("2d");
+    if (!cut) return;
+    const laid = lay(cut, draws);
+    if (!laid) return;
+    const box: Rect = [laid[0], laid[1], laid[2] - laid[0], laid[3] - laid[1]];
+    cut.globalCompositeOperation = "destination-out";
+    cut.drawImage(ink, ...box, ...box);
+    cut.globalCompositeOperation = "source-over";
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(cutting, ...box, ...box);
+    ctx.restore();
+    cut.clearRect(...box);
+  };
+
+  /** An image as it is, laid in 2D: on the CPU that costs far less than drawing it in WebGL and reading it back. */
+  const layImage = (ctx: CanvasRenderingContext2D, { source, rect, alpha }: ImageDraw) => {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = Math.min(1, Math.max(0, alpha));
+    ctx.globalCompositeOperation = "source-over";
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "low";
+    ctx.drawImage(source, ...rect);
+    ctx.restore();
+  };
+
+  const flush: InkGL["flush"] = (ctx) => {
+    if (!queue.length) return;
+    const draws = queue;
+    queue = [];
+    if (lost || disposed) return;
+    if (!software) {
+      lay(ctx, draws);
+      return;
+    }
+    // On the CPU every pixel WebGL draws at the target's resolution is dear, so only what is soft
+    // goes through it, at a share of that: sharp images and the cut by the ink are laid in 2D.
+    let waiting: Draw[] = [];
+    const layWaiting = () => {
+      if (waiting.length) lay(ctx, waiting);
+      waiting = [];
+    };
+    for (const draw of draws) {
+      if (draw.kind === "image" && !draw.draw.soft && !draw.draw.within) {
+        layWaiting();
+        layImage(ctx, draw.draw);
+      } else if (draw.kind === "group" && draw.draws.every(soft)) {
+        layWaiting();
+        layBehind(ctx, draw.ink, draw.draws);
+      } else waiting.push(draw);
+    }
+    layWaiting();
   };
 
   return {

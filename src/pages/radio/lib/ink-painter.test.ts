@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { captionBox, LEAVES, wrap } from "@/pages/radio/lib/ink-painter.ts";
-
-describe("captionBox", () => {
-  it("is the leaf's own box", () => {
-    expect(captionBox("TW")).toEqual(LEAVES.TW.caption);
-  });
-});
+import { wrap } from "@/pages/radio/lib/ink-painter.ts";
 
 describe("wrap", () => {
   const glyphs = (text: string) => Array.from(text);

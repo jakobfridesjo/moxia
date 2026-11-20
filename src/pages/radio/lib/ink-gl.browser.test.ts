@@ -24,8 +24,9 @@ const [WIDTH, HEIGHT] = [215, 430];
 const made: InkGL[] = [];
 afterEach(() => made.splice(0).forEach((gl) => gl.dispose()));
 
-function renderer() {
-  const gl = createInkGL();
+/** A renderer; with `onGpu`, one that draws as on a real GPU, though the test browser's WebGL runs on the CPU. */
+function renderer(onGpu = false) {
+  const gl = createInkGL(onGpu ? { software: false } : undefined);
   if (!gl) throw new Error("no WebGL2");
   made.push(gl);
   return gl;
@@ -104,13 +105,32 @@ describe("mist on the GPU", () => {
         gl?.flush(ctx);
       };
       const flat = drawn(scene, paint(null));
-      const gpu = drawn(scene, paint(renderer()));
+      // On the CPU the canvas is made the size of what is drawn; on a GPU it keeps the screen's.
+      for (const onGpu of [false, true]) {
+        const gpu = drawn(scene, paint(renderer(onGpu)));
 
-      expect(inked(gpu)).toBe(true);
-      const { mean, nearlyWorst } = difference(flat, gpu);
-      expect(mean).toBeLessThan(2.5);
-      expect(nearlyWorst).toBeLessThan(16);
+        expect(inked(gpu)).toBe(true);
+        const { mean, nearlyWorst } = difference(flat, gpu);
+        expect(mean).toBeLessThan(2.5);
+        expect(nearlyWorst).toBeLessThan(16);
+      }
     });
+
+  it("is the same whether the canvas is made to size or keeps the screen's", async () => {
+    const { image, scene } = await sceneOf("TW", false);
+    const paint = (gl: InkGL) => (ctx: CanvasRenderingContext2D) => {
+      const weather = makeWeather("TW", image, leafSize(image), DAY_TONE, gl);
+      weather.draw(ctx, PLAYING, 0, true);
+      weather.gust(ctx, 0.5, 1);
+      gl.flush(ctx);
+    };
+    const sized = drawn(scene, paint(renderer()));
+    const kept = drawn(scene, paint(renderer(true)));
+
+    const { mean, nearlyWorst } = difference(sized, kept);
+    expect(mean).toBeLessThan(0.1);
+    expect(nearlyWorst).toBeLessThanOrEqual(1);
+  });
 });
 
 describe("without the GPU", () => {
@@ -145,12 +165,14 @@ describe("night on the GPU", () => {
         gl?.flush(ctx);
       };
       const flat = drawn(scene, paint(null));
-      const gpu = drawn(scene, paint(renderer()));
+      for (const onGpu of [false, true]) {
+        const gpu = drawn(scene, paint(renderer(onGpu)));
 
-      expect(inked(gpu)).toBe(true);
-      const { mean, nearlyWorst } = difference(flat, gpu);
-      expect(mean).toBeLessThan(2);
-      expect(nearlyWorst).toBeLessThan(12);
+        expect(inked(gpu)).toBe(true);
+        const { mean, nearlyWorst } = difference(flat, gpu);
+        expect(mean).toBeLessThan(2);
+        expect(nearlyWorst).toBeLessThan(12);
+      }
     });
 
   it("leaves the light behind the ink", async () => {

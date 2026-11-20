@@ -19,3 +19,10 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# ML Kit (the invite scanner) creates its registrars by reflection through their no-argument
+# constructors, which R8 removes unless they are kept by name: firebase-components 16.1.0 keeps
+# only the classes.
+-keep class * implements com.google.firebase.components.ComponentRegistrar {
+    <init>();
+}

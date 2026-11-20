@@ -4,6 +4,8 @@
  */
 
 type Context = CanvasRenderingContext2D;
+/** Red, green and blue, 0 to 255. */
+export type Tint = readonly [number, number, number];
 
 const canvasOf = (width: number, height: number) => {
   const canvas = document.createElement("canvas");
@@ -62,6 +64,55 @@ function blurLines(
   }
 }
 
+/** As `blurLines`, for lines of one number a pixel. */
+function blurAlphaLines(
+  data: Float32Array,
+  { count, length, stride, step }: { count: number; length: number; stride: number; step: number },
+  radius: number
+) {
+  const line = new Float32Array(length);
+  const span = radius * 2 + 1;
+  for (let l = 0; l < count; l++) {
+    const start = l * stride;
+    for (let k = 0, at = start; k < length; k++, at += step) line[k] = data[at];
+    let sum = 0;
+    for (let k = 0; k <= radius && k < length; k++) sum += line[k];
+    for (let k = 0, at = start; k < length; k++, at += step) {
+      data[at] = sum / span;
+      if (k + radius + 1 < length) sum += line[k + radius + 1];
+      if (k - radius >= 0) sum -= line[k - radius];
+    }
+  }
+}
+
+/** Softens the alpha of `pixels` within `box`, leaving every pixel it reaches the one colour `tint`. */
+function softenAlpha(
+  pixels: ImageData,
+  box: { x: number; y: number; w: number; h: number },
+  radius: number,
+  [r, g, b]: Tint
+) {
+  const alpha = new Float32Array(box.w * box.h);
+  for (let y = 0; y < box.h; y++) {
+    let from = ((box.y + y) * pixels.width + box.x) * 4 + 3;
+    for (let i = y * box.w; i < (y + 1) * box.w; i++, from += 4) alpha[i] = pixels.data[from];
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    blurAlphaLines(alpha, { count: box.h, length: box.w, stride: box.w, step: 1 }, radius);
+    blurAlphaLines(alpha, { count: box.w, length: box.h, stride: 1, step: box.w }, radius);
+  }
+  for (let y = 0; y < box.h; y++) {
+    let to = ((box.y + y) * pixels.width + box.x) * 4;
+    for (let i = y * box.w; i < (y + 1) * box.w; i++, to += 4) {
+      const lit = alpha[i] > 0;
+      pixels.data[to] = lit ? r : 0;
+      pixels.data[to + 1] = lit ? g : 0;
+      pixels.data[to + 2] = lit ? b : 0;
+      pixels.data[to + 3] = alpha[i];
+    }
+  }
+}
+
 /** The box holding everything in `pixels` that isn't clear, `margin` pixels wider each way; null if all is clear. */
 function inkedBox({ data, width, height }: ImageData, margin: number) {
   let [left, top, right, bottom] = [width, height, -1, -1];
@@ -98,13 +149,22 @@ function shrunk(width: number, height: number, sigma: number) {
   };
 }
 
-/** Softens what `ctx` holds like CSS `blur(sigma px)`: three box passes each way, over no more than the blur can reach. */
-function soften(ctx: Context, sigma: number) {
+/**
+ * Softens what `ctx` holds like CSS `blur(sigma px)`: three box passes each way, over no more than
+ * the blur can reach. Where all of it is the one colour `tint`, only its alpha is worked through,
+ * a quarter of the work.
+ */
+function soften(ctx: Context, sigma: number, tint?: Tint) {
   const { width: w, height: h } = ctx.canvas;
   const radius = Math.max(1, Math.round((Math.sqrt(4 * sigma ** 2 + 1) - 1) / 2));
   const pixels = ctx.getImageData(0, 0, w, h);
   const box = inkedBox(pixels, radius * 3);
   if (!box) return;
+  if (tint) {
+    softenAlpha(pixels, box, radius, tint);
+    ctx.putImageData(pixels, 0, 0);
+    return;
+  }
   const data = new Float32Array(box.w * box.h * 4);
   for (let y = 0; y < box.h; y++) {
     let from = ((box.y + y) * w + box.x) * 4;
@@ -157,13 +217,15 @@ export function blurred(source: HTMLCanvasElement, sigma: number) {
 /**
  * Draws what `paint` draws (in the units of `transform`) onto `target`, blurred by `sigma` device
  * pixels. It is painted already shrunk, on a canvas kept in memory, so nothing is read back from
- * the GPU.
+ * the GPU. `tint` is the one colour `paint` draws in, when it draws in only one: it is softened
+ * much faster.
  */
 export function paintSoft(
   target: Context,
   transform: DOMMatrix,
   sigma: number,
-  paint: (g: Context) => void
+  paint: (g: Context) => void,
+  tint?: Tint
 ) {
   const { width, height } = target.canvas;
   const small = shrunk(width, height, sigma);
@@ -172,7 +234,7 @@ export function paintSoft(
   if (!g) return;
   g.setTransform(new DOMMatrix().scale(small.w / width, small.h / height).multiply(transform));
   paint(g);
-  soften(g, small.sigma);
+  soften(g, small.sigma, tint);
   target.save();
   target.setTransform(1, 0, 0, 1, 0, 0);
   target.imageSmoothingQuality = "high";

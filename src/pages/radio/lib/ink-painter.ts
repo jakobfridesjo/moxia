@@ -11,13 +11,12 @@ import { INK, PAPER, type Tone } from "@/pages/radio/lib/ink-tone.ts";
  * and cover the screen keeping their proportions, centred on their focus.
  */
 
-const LEAF_HEIGHT = 1600;
+export const LEAF_HEIGHT = 1600;
 /** Units at the top of a leaf that fade into the paper above it. */
 const TOP_FADE = 140;
 
 type Point = [number, number];
 /** Left, top, right and bottom. */
-type Box = [number, number, number, number];
 type Random = () => number;
 type Context = CanvasRenderingContext2D;
 
@@ -164,8 +163,6 @@ interface Leaf {
   crown: Point;
   /** Which way the listener looks: words leave his mouth (or crown) that way. */
   facing: 1 | -1;
-  /** The box subtitles are written in. */
-  caption: Box;
   /** Where the scroll lies while the radio records. */
   hands: Point;
   /** A jaw inside the part, hinged near the ear, that drops as he speaks to show the dark of his mouth. */
@@ -221,7 +218,6 @@ export const LEAVES: Record<CountryCode, Leaf> = {
     turn: 0.07,
     crown: [614, 672],
     facing: -1,
-    caption: [135, 365, 790, 665],
     hands: [520, 1064],
     jaw: {
       part: [
@@ -294,7 +290,6 @@ export const LEAVES: Record<CountryCode, Leaf> = {
     turn: 0.07,
     crown: [470, 560],
     facing: -1,
-    caption: [127, 220, 730, 597],
     hands: [420, 836],
   },
   // A boat poling home through the reeds on a misty river.
@@ -322,7 +317,6 @@ export const LEAVES: Record<CountryCode, Leaf> = {
     focus: 215,
     crown: [78, 1050],
     facing: 1,
-    caption: [17, 220, 660, 590],
     hands: [96, 1078],
   },
   // An old scholar, hands folded, listening to a waterfall while his boy holds his staff.
@@ -346,7 +340,6 @@ export const LEAVES: Record<CountryCode, Leaf> = {
     turn: 0.07,
     crown: [249, 755],
     facing: 1,
-    caption: [12, 394, 526, 739],
     hands: [262, 845],
     // His boy, who looks up to answer him.
     partner: {
@@ -853,8 +846,10 @@ export function wrap(
   return lines;
 }
 
-/** The size subtitles are written at, in leaf units. */
+/** The size subtitles are written at, in the units of a leaf as tall as the screen, so it is the same on every painting. */
 const CAPTION_SIZE = 40;
+/** The height of one line of Chinese subtitles, in the same units. */
+export const CAPTION_LINE = CAPTION_SIZE * 1.3;
 /** The blurs, as fractions of the glyph size, of the paper shadows laid behind a caption: a tight one for edges, wider ones for the glow. */
 const CAPTION_SHADOW = [0.15, 0.4, 0.8] as const;
 /** The width, as a fraction of the glyph size, of the paper stroke that thickens each glyph's halo so its glow spreads past the thin brush lines. */
@@ -881,11 +876,6 @@ function writeReading(
   ctx.restore();
 }
 
-/** Where subtitles are written in `region`'s leaf, as left, top, right and bottom in leaf units. */
-export function captionBox(region: CountryCode): Box {
-  return LEAVES[region].caption;
-}
-
 /** How `layout` is set in a box `width` wide: each cell's advance, its lines, and the height of a line and of the room for readings above it. */
 function setCaption(ctx: Context, layout: Layout, width: number) {
   const size = CAPTION_SIZE;
@@ -908,12 +898,12 @@ function setCaption(ctx: Context, layout: Layout, width: number) {
     width
   );
   const readings = read ? size * READING.above * 1.3 : 0;
-  const row = layout.chinese ? size * 1.3 + readings : glyph * 1.35;
+  const row = layout.chinese ? CAPTION_LINE + readings : glyph * 1.35;
   return { glyph, advances, lines, row, readings };
 }
 
 /**
- * A subtitle written in `box`, kept within `bounds`: from its top-left corner, line after line
+ * A subtitle written in `box`: from its top-left corner, line after line
  * down it, starting again at the top once the box is full, each cell of `layout` with as much ink as `inks` gives it, haloed in paper so the
  * painting never runs through them, in `tone`'s writing.
  */
@@ -921,13 +911,9 @@ export function drawCaption(
   ctx: Context,
   layout: Layout,
   inks: readonly number[],
-  box: Box,
-  { alpha, bounds, tone }: { alpha: number; bounds: Bounds; tone: Tone }
+  { left, top, right, bottom }: Bounds,
+  { alpha, tone }: { alpha: number; tone: Tone }
 ) {
-  const left = Math.max(box[0], bounds.left);
-  const top = Math.max(box[1], bounds.top);
-  const right = Math.min(box[2], bounds.right);
-  const bottom = Math.min(box[3], bounds.bottom);
   ctx.save();
   const size = CAPTION_SIZE;
   const { glyph, advances, lines, row, readings } = setCaption(ctx, layout, right - left);

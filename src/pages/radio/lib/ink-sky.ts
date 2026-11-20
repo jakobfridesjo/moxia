@@ -153,6 +153,11 @@ export function makeSky(gl: InkGL | null, now: () => SkyNow): Sky | null {
   return {
     draw: (ctx, { scene, air, still }) => {
       const { weather, glow, night } = now();
+      // A clear sky lays nothing, so it is not drawn: by day cloud greys only once heavy, and dusk warms; by night cloud drifts.
+      const falling = !still && (weather.rain > 0 || weather.snow > 0 || weather.storm);
+      const hung =
+        weather.fog > 0 || (night ? weather.cloud > 0.3 : weather.cloud > 0.5 || glow > 0);
+      if (!falling && !hung) return;
       const m = ctx.getTransform();
       const { width, height } = ctx.canvas;
       gl.day({

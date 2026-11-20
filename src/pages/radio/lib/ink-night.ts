@@ -2,7 +2,7 @@ import type { CountryCode } from "@/shared/api/commands.ts";
 import type { Air } from "@/pages/radio/lib/air.ts";
 import type { Scene } from "@/pages/radio/lib/ink-painter.ts";
 import { NIGHT_TONE, type Tone } from "@/pages/radio/lib/ink-tone.ts";
-import { blurred, paintSoft } from "@/pages/radio/lib/soften.ts";
+import { blurred, paintSoft, type Tint } from "@/pages/radio/lib/soften.ts";
 import type { InkGL } from "@/pages/radio/lib/ink-gl.ts";
 
 /*
@@ -18,6 +18,7 @@ type Point = [number, number];
 type Context = CanvasRenderingContext2D;
 
 const TAU = Math.PI * 2;
+const WHITE: Tint = [255, 255, 255];
 const clamp = (value: number, low = 0, high = 1) => Math.min(high, Math.max(low, value));
 
 function seeded(seed: number) {
@@ -218,9 +219,9 @@ function glGlow(
   });
 }
 
-/** A layer worked out for the whole screen, queued on the GPU at `alpha`. */
-function glLayer(gl: InkGL, layer: HTMLCanvasElement, alpha: number) {
-  gl.image({ source: layer, rect: [0, 0, layer.width, layer.height], alpha: clamp(alpha) });
+/** A layer worked out for the whole screen, queued on the GPU at `alpha`; `soft` where nothing in it is sharp. */
+function glLayer(gl: InkGL, layer: HTMLCanvasElement, alpha: number, soft = false) {
+  gl.image({ source: layer, rect: [0, 0, layer.width, layer.height], alpha: clamp(alpha), soft });
 }
 
 /** Where the leaf has no ink, to tell open water from rock and reed: its alpha, read once. */
@@ -558,6 +559,7 @@ function teaStove(image: ImageBitmap, gl: InkGL | null, moon: () => number): Nig
             source: moonlight,
             rect: [m.e, m.f, leaf[2] * m.a, leaf[3] * m.d],
             alpha: moon(),
+            soft: true,
           });
           for (const fire of fires) glGlow(gl, ctx, fire.at, fire.radius, fire.color, fire.stops);
           for (const pool of pools) glGlow(gl, ctx, pool.at, pool.radius, FIREFLY, pool.stops);
@@ -791,26 +793,38 @@ function incense(gl: InkGL | null): Night {
     const canvas = canvasOf(ctx.canvas.width, ctx.canvas.height);
     const c = canvas.getContext("2d");
     if (!c) return canvas;
-    paintSoft(c, m, 40 * scale, (s) => {
-      const fall = s.createRadialGradient(400, 820, 0, 400, 820, 256);
-      fall.addColorStop(0, "rgba(255,255,255,0.5)");
-      fall.addColorStop(0.5, "rgba(255,255,255,0.18)");
-      fall.addColorStop(1, "rgba(255,255,255,0)");
-      s.fillStyle = fall;
-      s.fill(pathOf(LIT.body));
-      s.fillStyle = "rgba(255,255,255,0.45)";
-      s.fill(pathOf(LIT.hands));
-    });
-    paintSoft(c, m, Math.max(1, 8.8 * scale), (n) => {
-      n.fillStyle = "rgba(255,255,255,0.7)";
-      n.fill(pathOf(LIT.face));
-      n.fillStyle = "rgba(255,255,255,0.95)";
-      n.fill(pathOf(LIT.hands));
-      n.fillStyle = "rgba(255,255,255,0.6)";
-      n.beginPath();
-      n.arc(...EMBER, 9.6, 0, TAU);
-      n.fill();
-    });
+    paintSoft(
+      c,
+      m,
+      40 * scale,
+      (s) => {
+        const fall = s.createRadialGradient(400, 820, 0, 400, 820, 256);
+        fall.addColorStop(0, "rgba(255,255,255,0.5)");
+        fall.addColorStop(0.5, "rgba(255,255,255,0.18)");
+        fall.addColorStop(1, "rgba(255,255,255,0)");
+        s.fillStyle = fall;
+        s.fill(pathOf(LIT.body));
+        s.fillStyle = "rgba(255,255,255,0.45)";
+        s.fill(pathOf(LIT.hands));
+      },
+      WHITE
+    );
+    paintSoft(
+      c,
+      m,
+      Math.max(1, 8.8 * scale),
+      (n) => {
+        n.fillStyle = "rgba(255,255,255,0.7)";
+        n.fill(pathOf(LIT.face));
+        n.fillStyle = "rgba(255,255,255,0.95)";
+        n.fill(pathOf(LIT.hands));
+        n.fillStyle = "rgba(255,255,255,0.6)";
+        n.beginPath();
+        n.arc(...EMBER, 9.6, 0, TAU);
+        n.fill();
+      },
+      WHITE
+    );
     c.globalCompositeOperation = "source-in";
     c.setTransform(m);
     const warm = c.createRadialGradient(...EMBER, 0, ...EMBER, 400);
@@ -834,7 +848,7 @@ function incense(gl: InkGL | null): Night {
       ];
       if (gl?.ready && !held) {
         gl.behindInk(scene.ink, () => {
-          glLayer(gl, lit, ember);
+          glLayer(gl, lit, ember, true);
           glGlow(gl, ctx, EMBER, 28, "255,120,32", warmth);
         });
         return;
@@ -927,19 +941,27 @@ const FOG_BANKS = [
   { y: 0.93, speed: -0.022, alpha: 0.45 },
 ];
 
-/** A strip of fog twice `width` wide and `height` tall that tiles with itself sideways. */
+/** Fog is soft, so a bank is worked out at this share of the screen's resolution and drawn up. */
+const BANK_RESOLUTION = 0.5;
+
+/** A strip of fog to lie twice `width` wide and `height` tall, that tiles with itself sideways. */
 function fogBank(width: number, height: number, seed: number) {
-  const canvas = canvasOf(width * 2, height);
+  const canvas = canvasOf(
+    Math.ceil(width * 2 * BANK_RESOLUTION),
+    Math.ceil(height * BANK_RESOLUTION)
+  );
   const g = canvas.getContext("2d");
   if (!g) return canvas;
+  const span = width * 2;
+  g.scale(canvas.width / span, canvas.height / height);
   const random = seeded(seed);
   for (let i = 0; i < 64; i++) {
-    const x = random() * canvas.width;
+    const x = random() * span;
     const y = height * (0.38 + random() * 0.24);
     const rx = width * (0.18 + random() * 0.34);
     const ry = height * (0.14 + random() * 0.24);
     const alpha = 0.07 + random() * 0.12;
-    for (const dx of [-canvas.width, 0, canvas.width]) {
+    for (const dx of [-span, 0, span]) {
       g.save();
       g.translate(x + dx, y);
       g.scale(rx / ry, 1);
@@ -975,13 +997,15 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
   /** What is worked out once for the screen and the painting: the beams through the branch, the water's sheen, the fog. */
   let made: {
     key: string;
-    scene: Scene;
     beams: HTMLCanvasElement[];
     inlet: HTMLCanvasElement;
     sheen: HTMLCanvasElement;
     river: HTMLCanvasElement;
     banks: HTMLCanvasElement[];
     riverBank: HTMLCanvasElement;
+    /** How wide and tall a bank lies on the screen, in its pixels. */
+    bank: [number, number];
+    /** Room to cut the river's mist in, without the GPU. */
     mist: HTMLCanvasElement;
   } | null = null;
 
@@ -989,7 +1013,8 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
     const m = ctx.getTransform();
     const { width, height } = ctx.canvas;
     const key = `${width}x${height}:${m.a},${m.e},${m.f}`;
-    if (made?.key === key && made.scene === scene) return made;
+    // The painting's ink is the same whenever its leaf lies the same on the same screen.
+    if (made?.key === key) return made;
     const scale = m.a;
     const layer = () => {
       const canvas = canvasOf(width, height);
@@ -997,8 +1022,9 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
       g?.setTransform(m);
       return { canvas, g };
     };
-    const soft = (target: Context, units: number, paint: (g: Context) => void) =>
-      paintSoft(target, m, Math.max(1, units * scale), paint);
+    /** `paint`, which draws only in `tint`, softened by `units` onto `target`. */
+    const soft = (target: Context, units: number, tint: Tint, paint: (g: Context) => void) =>
+      paintSoft(target, m, Math.max(1, units * scale), paint, tint);
 
     // Moonbeams of mixed widths fanning from over the cliff top, broken up by thin mist,
     // the branch's leaves blocking them and leaving shadows trailing down them.
@@ -1012,7 +1038,7 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
       const half = 0.007 + random() ** 2 * 0.026;
       const reach = 430 + random() * 370;
       const peak = (0.3 + random() * 0.3) * (half > 0.018 ? 0.7 : 1);
-      soft(g, 715 * (0.003 + half * 0.3), (b) => {
+      soft(g, 715 * (0.003 + half * 0.3), [224, 233, 248], (b) => {
         b.beginPath();
         b.moveTo(sx, sy);
         b.lineTo(sx + Math.cos(angle - half) * reach, sy + Math.sin(angle - half) * reach);
@@ -1070,13 +1096,14 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
     }
 
     // A faint sheen on the stream and the fall.
+    const SHEEN: Tint = [196, 212, 232];
     const sheen = layer();
     if (sheen.g) {
-      soft(sheen.g, 21, (g) => {
+      soft(sheen.g, 21, SHEEN, (g) => {
         g.fillStyle = "rgba(196,212,232,0.16)";
         g.fill(stream);
       });
-      soft(sheen.g, 8.6, (g) => {
+      soft(sheen.g, 8.6, SHEEN, (g) => {
         g.fillStyle = "rgba(196,212,232,0.2)";
         g.fill(fall);
       });
@@ -1085,21 +1112,21 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
     // Where mist lies on the river, and the fog.
     const river = layer();
     if (river.g)
-      soft(river.g, 43, (g) => {
+      soft(river.g, 43, WHITE, (g) => {
         g.fillStyle = "#fff";
         g.fill(stream);
       });
     const bankHeight = Math.round(height * 0.3);
     made = {
       key,
-      scene,
       beams: beams.map(({ canvas }) => canvas),
       inlet: inlet.canvas,
       sheen: sheen.canvas,
       river: river.canvas,
       banks: FOG_BANKS.map((_, i) => fogBank(width, bankHeight, 100 + i)),
       riverBank: fogBank(width, bankHeight, 140),
-      mist: canvasOf(width, height),
+      bank: [width * 2, bankHeight],
+      mist: canvasOf(1, 1),
     };
     return made;
   };
@@ -1123,7 +1150,7 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
       if (gl?.ready && !held) {
         gl.behindInk(scene.ink, () => {
           glGlow(gl, ctx, SKY_GLOW.at, SKY_GLOW.reach, "226,234,248", sky);
-          glLayer(gl, parts.sheen, through);
+          glLayer(gl, parts.sheen, through, true);
         });
         glLayer(gl, parts.inlet, inletAlpha);
         parts.beams.forEach((beam, i) => glLayer(gl, beam, beamAlpha(i)));
@@ -1152,32 +1179,38 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
       // The fog drifts with what plays, like the rest of the weather; the light never does.
       if (!still) drift += seconds * (0.15 + 0.85 * air.life);
       const { width, height } = ctx.canvas;
+      const [bankWidth, bankHeight] = parts.bank;
       const banks = FOG_BANKS.map((bank, i) => {
-        const texture = parts.banks[i];
         const phase = bank.y * 37;
         return {
-          texture,
-          x: -wrap(drift * bank.speed * width, texture.width),
-          y: bank.y * height - texture.height / 2 + Math.sin(drift * 0.23 + phase) * height * 0.018,
+          texture: parts.banks[i],
+          x: -wrap(drift * bank.speed * width, bankWidth),
+          y: bank.y * height - bankHeight / 2 + Math.sin(drift * 0.23 + phase) * height * 0.018,
           alpha: bank.alpha * (0.8 + 0.2 * Math.sin(drift * 0.31 + phase * 1.7)),
         };
       });
       const river = parts.riverBank;
       const riverAt = {
-        x: -wrap(drift * 0.045 * width, river.width),
-        y: height * 0.86 - river.height * 0.8,
+        x: -wrap(drift * 0.045 * width, bankWidth),
+        y: height * 0.86 - bankHeight * 0.8,
       };
       if (gl?.ready) {
         for (const { texture, x, y, alpha } of banks)
-          for (const left of [x, x + texture.width])
-            gl.image({ source: texture, rect: [left, y, texture.width, texture.height], alpha });
+          for (const left of [x, x + bankWidth])
+            gl.image({
+              source: texture,
+              rect: [left, y, bankWidth, bankHeight],
+              alpha,
+              soft: true,
+            });
         // More mist lying on the river, drifting with the current.
-        for (const left of [riverAt.x, riverAt.x + river.width])
+        for (const left of [riverAt.x, riverAt.x + bankWidth])
           gl.image({
             source: river,
-            rect: [left, riverAt.y, river.width, river.height * 1.6],
+            rect: [left, riverAt.y, bankWidth, bankHeight * 1.6],
             alpha: 0.55,
             within: parts.river,
+            soft: true,
           });
         gl.fill([0, 0, 0], 0.3);
         gl.flush(ctx);
@@ -1188,16 +1221,18 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       for (const { texture, x, y, alpha } of banks) {
         ctx.globalAlpha = alpha;
-        ctx.drawImage(texture, x, y);
-        ctx.drawImage(texture, x + texture.width, y);
+        ctx.drawImage(texture, x, y, bankWidth, bankHeight);
+        ctx.drawImage(texture, x + bankWidth, y, bankWidth, bankHeight);
       }
       // More mist lying on the river, drifting with the current.
+      if (parts.mist.width !== width || parts.mist.height !== height)
+        Object.assign(parts.mist, { width, height });
       const mist = parts.mist.getContext("2d");
       if (mist) {
         mist.globalCompositeOperation = "source-over";
         mist.clearRect(0, 0, width, height);
-        for (const left of [riverAt.x, riverAt.x + river.width])
-          mist.drawImage(river, left, riverAt.y, river.width, river.height * 1.6);
+        for (const left of [riverAt.x, riverAt.x + bankWidth])
+          mist.drawImage(river, left, riverAt.y, bankWidth, bankHeight * 1.6);
         mist.globalCompositeOperation = "destination-in";
         mist.drawImage(parts.river, 0, 0);
         ctx.globalAlpha = 0.55;

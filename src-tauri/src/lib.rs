@@ -56,6 +56,13 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 app.state::<AppState>().media.attach(&window);
             }
+            #[cfg(desktop)]
+            match keep_display_on() {
+                Ok(awake) => {
+                    app.manage(awake);
+                }
+                Err(error) => log::warn!("The display may sleep: {error:?}"),
+            }
 
             let handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -102,4 +109,15 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
+}
+
+/// Keeps the display from sleeping for as long as the result lives.
+#[cfg(desktop)]
+fn keep_display_on() -> Result<keepawake::KeepAwake, keepawake::Error> {
+    keepawake::Builder::default()
+        .display(true)
+        .reason("Showing the radio")
+        .app_name("Moxia")
+        .app_reverse_domain("io.github.jakobfridesjo.moxia")
+        .create()
 }

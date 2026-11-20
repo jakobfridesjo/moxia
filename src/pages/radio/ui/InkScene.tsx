@@ -14,10 +14,11 @@ import {
 } from "@/features/player/model/subtitles.ts";
 import { inkIn, inkLeft, layOut, type Layout } from "@/pages/radio/lib/captions.ts";
 import {
-  captionBox,
+  CAPTION_LINE,
   drawCaption,
   drawDrift,
   drawListener,
+  LEAF_HEIGHT,
   leafSize,
   paintScene,
   restScene,
@@ -66,7 +67,7 @@ interface InkSceneProps {
   sky: LocalSky;
   /** Something opaque lies over the painting, so what moves in it rests. */
   covered?: boolean;
-  /** The keys in the top corner: subtitles start clear of them. */
+  /** The keys in the top corner: subtitles keep as far from them as they keep from the screen's edge. */
   keys?: RefObject<HTMLElement | null>;
 }
 
@@ -75,8 +76,12 @@ const FADE_MS = 1300;
 /** How long a new place takes to soak through, and mist takes to blow past, in ms. */
 const BLOOM_MS = 2200;
 const GUST_MS = 2800;
-/** How far below the keys subtitles start, in CSS pixels. */
-const CAPTION_CLEAR = 24;
+/** How far subtitles keep from the screen's edge where there are no keys to measure it by, in CSS pixels. */
+const CAPTION_MARGIN = 16;
+/** The room the usual inscription takes from the screen's right edge, in CSS pixels: its margin, the name's column under its seal and the frequency beside it. Subtitles keep clear of that much whatever the station, so their box never changes width. */
+const INSCRIPTION_ROOM = 96;
+/** How far down the screen subtitles may be written, as a fraction of its height: the same on every painting. */
+const CAPTION_END = 0.43;
 const SILENT_TALK: Talk = { talking: false, voice: 0 };
 
 const ease = (t: number) => t * t * (3 - 2 * t);
@@ -169,6 +174,8 @@ export function InkScene({
   const weather = useRef<Weather | null>(null);
   // At night each painting is lit by something in it; by day some have weather and light of their own.
   const lighting = useRef<Night | null>(null);
+  // Each place's night light is worked out once and kept while it is night, so coming back to a place costs nothing.
+  const nights = useRef(new Map<CountryCode, { image: ImageBitmap; gl: InkGL; night: Night }>());
   const daylight = useRef<Day | null>(null);
   // Weather, light and blooms are drawn only on the GPU, when there is WebGL2 and shaders are on; made on first use.
   const gpu = useRef<InkGL | null | undefined>(undefined);
@@ -183,6 +190,7 @@ export function InkScene({
       // Made with the renderer just let go, so made afresh.
       weather.current = null;
       lighting.current = null;
+      nights.current.clear();
       daylight.current = null;
       overhead.current = null;
     },
@@ -255,8 +263,15 @@ export function InkScene({
                 windOf: () => skyNow.current.weather.wind,
               })
             : null;
-      lighting.current =
-        gl && night && image ? makeNight(region, image, gl, () => moonlight(skyNow.current)) : null;
+      if (!night) nights.current.clear();
+      const lit = nights.current.get(region);
+      if (gl && night && image && (lit?.image !== image || lit.gl !== gl))
+        nights.current.set(region, {
+          image,
+          gl,
+          night: makeNight(region, image, gl, () => moonlight(skyNow.current)),
+        });
+      lighting.current = gl && night && image ? (nights.current.get(region)?.night ?? null) : null;
       daylight.current = day;
       overhead.current = gl && environment ? makeSky(gl, readSky) : null;
       canvas.style.zIndex = "1";
@@ -313,9 +328,12 @@ export function InkScene({
         holding.current = false;
         endChange.current = null;
       };
+      // The GPU takes the soaking painting once, as a texture, so its figures are posed once; in 2D it is read every frame.
+      let taken = false;
       const step = (now: number) => {
         if (leaving) hold(old, leavingHoled, leaving);
-        if (scene) hold(incoming, holed, scene);
+        if (scene && !taken) hold(incoming, holed, scene);
+        taken = soak !== null && gl !== null && gl.ready && !gl.software;
         if (soak) {
           const progress = (now - start) / BLOOM_MS;
           if (progress >= 1) return finish();
@@ -371,15 +389,22 @@ export function InkScene({
     // Read once per resize, not every frame, which could force a layout.
     let width = element.clientWidth;
     let height = element.clientHeight;
-    const keysEnd = () =>
-      keys?.current
-        ? keys.current.getBoundingClientRect().bottom - element.getBoundingClientRect().top
-        : 0;
-    let captionTop = keysEnd() + CAPTION_CLEAR;
+    // Subtitles keep the keys' own margin: from the screen's edge, the keys above and the usual inscription beside them.
+    const captionRoom = () => {
+      const frame = element.getBoundingClientRect();
+      const keysBox = keys?.current?.getBoundingClientRect();
+      const margin = keysBox ? keysBox.left - frame.left : CAPTION_MARGIN;
+      return {
+        left: margin,
+        top: (keysBox ? keysBox.bottom - frame.top : 0) + margin,
+        right: frame.width - INSCRIPTION_ROOM - margin,
+      };
+    };
+    let room = captionRoom();
     const observer = new ResizeObserver(() => {
       width = element.clientWidth;
       height = element.clientHeight;
-      captionTop = keysEnd() + CAPTION_CLEAR;
+      room = captionRoom();
     });
     observer.observe(element);
     if (keys?.current) observer.observe(keys.current);
@@ -484,20 +509,25 @@ export function InkScene({
       }
       gl?.flush(ctx);
 
-      const [a, , , d, e, f] = scene.transform;
-      const bounds = {
-        left: -e / a,
-        top: (captionTop * ratio - f) / d,
-        right: (canvas.width - e) / a,
-        bottom: (canvas.height - f) / d,
+      // Subtitles are written at one size on every painting, however large its leaf is drawn: in units of the screen's height.
+      const unit = (height * ratio) / LEAF_HEIGHT;
+      const box = {
+        left: (room.left * ratio) / unit,
+        // One line further down than the margin under the keys.
+        top: (room.top * ratio) / unit + CAPTION_LINE,
+        right: (room.right * ratio) / unit,
+        bottom: LEAF_HEIGHT * CAPTION_END,
       };
+      ctx.save();
+      ctx.setTransform(unit, 0, 0, unit, 0, 0);
       captions.forEach((caption, index) => {
         const alpha = inkLeft(caption, now, captions[index + 1]?.at ?? null);
         if (alpha <= 0) return;
         const layout = layoutOf(caption);
         const inks = still ? layout.cells.map(() => 1) : inkIn(caption, layout, now);
-        drawCaption(ctx, layout, inks, captionBox(scene.region), { alpha, bounds, tone });
+        drawCaption(ctx, layout, inks, box, { alpha, tone });
       });
+      ctx.restore();
 
       frame = requestAnimationFrame(draw);
     };
