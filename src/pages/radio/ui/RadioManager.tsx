@@ -4,6 +4,7 @@ import { useMessages } from "@/shared/i18n/messages.ts";
 import { formatShortDateTime } from "@/shared/lib/date.ts";
 import { formatTapeTime } from "@/shared/lib/duration.ts";
 import { cn } from "@/shared/lib/class-names.ts";
+import { nightAtom } from "@/shared/lib/night.ts";
 import { noteAt } from "@/pages/radio/model/radio-state.ts";
 import { useLocalSky } from "@/pages/radio/model/use-local-sky.ts";
 import { useMediaControls } from "@/pages/radio/model/use-media-controls.ts";
@@ -208,7 +209,10 @@ function RadioManager() {
           <Seal
             pressed={pathOpen}
             aria-label={m.radio.sealLabels.recordings}
-            onClick={() => setPathOpen(true)}
+            onClick={() => {
+              radio.openRecordings();
+              setPathOpen(true);
+            }}
           >
             {m.radio.seals.path}
           </Seal>
@@ -250,11 +254,6 @@ function RadioManager() {
               </span>
             )}
           </div>
-          {playingBack && (
-            <Seal aria-label={m.radio.sealLabels.live} onClick={radio.backToLive}>
-              {m.radio.seals.live}
-            </Seal>
-          )}
         </div>
 
         {inRoom && sheet !== "chat" && <ChatDrift lines={together.room.lines} />}
@@ -298,10 +297,13 @@ function RadioManager() {
             }
             onBreak={(broken) => {
               if (mode === "playback" && broken.id === tape?.id) radio.toggle();
-              radio.say(m.radio.mendHint);
+              radio.say(nightAtom.get() ? m.radio.unburnHint : m.radio.mendHint);
             }}
             onDelete={radio.deleteRecording}
-            onLeave={() => setPathOpen(false)}
+            onLeave={() => {
+              setPathOpen(false);
+              radio.leaveRecordings();
+            }}
           />
         )}
 

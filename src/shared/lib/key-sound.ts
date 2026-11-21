@@ -92,3 +92,38 @@ export function playCrack() {
   source.start(now + 0.02);
   source.stop(now + 0.1);
 }
+
+/** A paper slip catching fire, when key sounds are on: a soft rush of flame, then crackling. */
+export function playIgnite() {
+  if (!keySoundsAtom.get()) return;
+  const context = audio();
+  if (!context) return;
+  const now = context.currentTime;
+  const rush = context.createBufferSource();
+  rush.buffer = noiseBuffer(context);
+  rush.loop = true;
+  const body = context.createBiquadFilter();
+  body.type = "lowpass";
+  body.frequency.setValueAtTime(300, now);
+  body.frequency.linearRampToValueAtTime(1400, now + 0.25);
+  body.frequency.exponentialRampToValueAtTime(500, now + 1.2);
+  const level = context.createGain();
+  level.gain.setValueAtTime(0.0001, now);
+  level.gain.exponentialRampToValueAtTime(0.35, now + 0.18);
+  level.gain.exponentialRampToValueAtTime(0.0001, now + 1.3);
+  rush.connect(body).connect(level).connect(context.destination);
+  rush.start(now);
+  rush.stop(now + 1.3);
+  // The paper catching: a scatter of tiny dry snaps.
+  for (let i = 0; i < 9; i++) {
+    const at = now + 0.15 + Math.random() * 1.6;
+    const snap = context.createBufferSource();
+    snap.buffer = noiseBuffer(context);
+    const crackle = context.createBiquadFilter();
+    crackle.type = "highpass";
+    crackle.frequency.value = 2500 + Math.random() * 2500;
+    snap.connect(crackle).connect(decay(context, at, 0.06 + Math.random() * 0.1, 0.012));
+    snap.start(at, Math.random() * 0.08);
+    snap.stop(at + 0.02);
+  }
+}

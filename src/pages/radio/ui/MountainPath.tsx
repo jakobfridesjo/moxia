@@ -1,4 +1,12 @@
-import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useSelector } from "@tanstack/react-store";
 import type { Tape } from "@/shared/api/commands.ts";
 import { useMessages } from "@/shared/i18n/messages.ts";
@@ -10,25 +18,31 @@ import { createInkGL } from "@/pages/radio/lib/ink-gl.ts";
 import { formatMonthDay, formatShortDateTime } from "@/shared/lib/date.ts";
 import { formatTapeTime } from "@/shared/lib/duration.ts";
 import { cn } from "@/shared/lib/class-names.ts";
-import { playCrack } from "@/shared/lib/key-sound.ts";
+import { playCrack, playIgnite } from "@/shared/lib/key-sound.ts";
 import {
   PATH_LENGTH,
-  PLACES,
+  LIT_WINDOWS,
+  MOONLIT_SKY,
   SCROLL,
   TRAVELLER,
   CANE,
   travellerPart,
   clampToPath,
   pathData,
-  placeAt,
   pointAt,
   slotAt,
-  type PlaceName,
 } from "@/pages/radio/lib/scroll-path.ts";
 import { MOVE_PX, useHold } from "@/pages/radio/model/use-hold.ts";
 import { listenToAir } from "@/pages/radio/lib/air.ts";
 import { makeWeather, type Weather } from "@/pages/radio/lib/ink-weather.ts";
-import { DAY_TONE, PATH_NIGHT_TONE } from "@/pages/radio/lib/ink-tone.ts";
+import {
+  DAY_TONE,
+  FIRELIGHT,
+  MOONLIT,
+  PATH_NIGHT_GROUND,
+  PATH_NIGHT_SKY,
+  PATH_NIGHT_TONE,
+} from "@/pages/radio/lib/ink-tone.ts";
 import { Seal } from "@/pages/radio/ui/Seal.tsx";
 import painting from "./ink/monastery-path.webp";
 
@@ -72,6 +86,16 @@ const STRUCK_DEG = 55;
 /** How far he leans into it, in degrees: back as he raises it, forward as it lands. */
 const RAISE_LEAN_DEG = 5;
 const STRIKE_LEAN_DEG = -8;
+/** At night, where the light round the old man is centred on him, in layer px, and how far it reaches, and a burning slip's. */
+const GLOW_AT = [232, 3285] as const;
+const GLOW_REACH = 210;
+/** How strongly the firelight lies on the paper at its heart, falling off as the boat's lamp does. */
+const GLOW_HEART = 0.55;
+/** How far the lamplight from a house reaches, in layer px. */
+const WINDOW_REACH = 85;
+const SLIP_FIRELIGHT_REACH = 150;
+/** How long a slip takes to burn away, in ms. */
+const BURN_MS = 2600;
 /** How long the broken pieces take to fade away, while a tap can still mend them, in ms. */
 const FADE_MS = 5000;
 /** How long the pieces take to fly back together, in ms. */
@@ -160,13 +184,19 @@ function walkTo(state: Motion, to: number, now: number, still: boolean) {
 
 /**
  * The old man's pose `elapsed` ms into a blow, in degrees as he faces in the painting
- * (left): the cane turned forward about his hand, and his lean, forward negative.
+ * (left): the cane turned forward about his hand, and his lean, forward negative. By day he
+ * brings his cane down on the slip; at night he bends to it as it catches fire.
  */
-function blowPose(elapsed: number) {
+function blowPose(elapsed: number, burning: boolean) {
   const between = (from: number, to: number, start: number, end: number) => {
     const u = Math.min(1, Math.max(0, (elapsed - start) / (end - start)));
     return from + (to - from) * (1 - (1 - u) ** 2);
   };
+  if (burning) {
+    if (elapsed < HIT_MS) return { cane: 0, lean: between(0, STRIKE_LEAN_DEG, 0, HIT_MS) };
+    if (elapsed < HOLD_MS) return { cane: 0, lean: STRIKE_LEAN_DEG };
+    return { cane: 0, lean: between(STRIKE_LEAN_DEG, 0, HOLD_MS, SWING_MS) };
+  }
   if (elapsed < RAISE_MS)
     return {
       cane: between(0, RAISED_DEG, 0, RAISE_MS),
@@ -206,8 +236,8 @@ interface TravellerCutout {
   height: number;
   body: ImageData;
   cane: ImageData;
-  /** Paper over where he stood. */
-  covered: ImageData;
+  /** A mask of where he stood, to take him out of the painting once he walks off. */
+  hole: string;
 }
 
 let travellerCutout: Promise<TravellerCutout | null> | null = null;
@@ -266,7 +296,10 @@ function cutTraveller() {
         }
       }
     }
-    return { width, height, ...parts, covered };
+    const holeCanvas = document.createElement("canvas");
+    Object.assign(holeCanvas, { width, height });
+    holeCanvas.getContext("2d")?.putImageData(covered, 0, 0);
+    return { width, height, ...parts, hole: holeCanvas.toDataURL() };
   })().catch(() => {
     travellerCutout = null;
     return null;
@@ -297,11 +330,13 @@ export function MountainPath({
   onLeave: () => void;
 }) {
   const m = useMessages();
-  // At night the painting turns pale on dark paper, and its weather with it.
+  // At night the moon dims the paper, light glows round the old man, and he burns what he is asked to break.
   const night = useSelector(nightAtom);
   const tone = useRef(night ? PATH_NIGHT_TONE : DAY_TONE);
+  const burning = useRef(night);
   useLayoutEffect(() => {
     tone.current = night ? PATH_NIGHT_TONE : DAY_TONE;
+    burning.current = night;
   }, [night]);
   const [breaks, setBreaks] = useState<Record<string, BreakPhase>>({});
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
@@ -337,7 +372,10 @@ export function MountainPath({
   const traveller = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLCanvasElement>(null);
   const cane = useRef<HTMLCanvasElement>(null);
-  const patch = useRef<HTMLCanvasElement>(null);
+  const glow = useRef<HTMLDivElement>(null);
+  const slipFirelights = useRef(new Map<string, HTMLElement>());
+  const paintingImage = useRef<HTMLImageElement>(null);
+  const [hole, setHole] = useState<string | null>(null);
   const sky = useRef<HTMLCanvasElement>(null);
   const walked = useRef<SVGPathElement>(null);
   const ahead = useRef<SVGPathElement>(null);
@@ -390,7 +428,8 @@ export function MountainPath({
       const pending = doomed.current.get(id);
       if (!pending) return;
       phase(id, "broken");
-      playCrack();
+      if (burning.current) playIgnite();
+      else playCrack();
       broke.current(pending.tape);
       pending.timer = setTimeout(() => {
         doomed.current.delete(id);
@@ -468,7 +507,7 @@ export function MountainPath({
       return true;
     };
     const style = (
-      element: HTMLElement | null | undefined,
+      element: HTMLElement | SVGElement | null | undefined,
       key: "translate" | "transform" | "rotate" | "opacity" | "zIndex",
       value: string
     ) => {
@@ -576,6 +615,7 @@ export function MountainPath({
         const { x, y } = slipPlace(slot.at, slot.side, k);
         const slip = slipEls.current.get(id);
         style(slip, "translate", `${x}px ${y}px`);
+        style(slipFirelights.current.get(id), "translate", `${x}px ${y}px`);
         style(slip, "zIndex", String(Math.max(0, Math.round(y))));
         const tie = tieEls.current.get(id);
         attribute(tie?.firstElementChild, "d", `M${stone.x * k} ${stone.y * k}L${x} ${y}`);
@@ -597,10 +637,13 @@ export function MountainPath({
       if (traveller.current) {
         const stride = (2 * Math.PI * (now - walk.start)) / STRIDE_MS;
         const bob = -Math.abs(Math.sin(stride)) * BOB_PX * gait;
-        const pose = swing ? blowPose(swingElapsed) : null;
+        const pose = swing ? blowPose(swingElapsed, burning.current) : null;
         const lean = pose ? pose.lean : Math.sin(stride) * ROCK_DEG * gait;
         const caneTurn = pose ? pose.cane : Math.sin(stride) * CANE_SWING_DEG * gait;
         style(cane.current, "rotate", `${caneTurn}deg`);
+        const glowX = feet.x + (state.facesRight ? -1 : 1) * (GLOW_AT[0] - TRAVELLER.feet[0]);
+        const glowY = feet.y + GLOW_AT[1] - TRAVELLER.feet[1];
+        style(glow.current, "translate", `${glowX * k}px ${glowY * k + bob}px`);
         style(
           traveller.current,
           "translate",
@@ -612,7 +655,7 @@ export function MountainPath({
           `scaleX(${state.facesRight ? -1 : 1}) rotate(${lean}deg)`
         );
       }
-      style(patch.current, "opacity", walk.at > 4 ? "1" : "0");
+      attribute(paintingImage.current, "data-away", String(walk.at > 4));
     };
     raf = requestAnimationFrame(draw);
     return () => {
@@ -660,39 +703,35 @@ export function MountainPath({
   };
 
   // The old man is cut from the painting itself, body and cane apart so the cane can swing,
-  // and once he walks off, paper covers the strokes he left on the bridge. At night he turns
-  // pale with the painting.
+  // and once he walks off, his strokes on the bridge are masked out of it, so the paper
+  // behind shows there as it does everywhere else, lit or not.
   useEffect(() => {
     let cancelled = false;
     void cutTraveller()
       .then((cutout) => {
-        const canvases = [body.current, cane.current, patch.current];
-        if (!cutout || cancelled || canvases.some((canvas) => !canvas)) return;
+        if (!cutout || cancelled || !body.current || !cane.current) return;
         const { width, height } = cutout;
-        const [bodyCanvas, caneCanvas, patchCanvas] = canvases as HTMLCanvasElement[];
         for (const [canvas, pixels] of [
-          [bodyCanvas, cutout.body],
-          [caneCanvas, cutout.cane],
-          [patchCanvas, cutout.covered],
+          [body.current, cutout.body],
+          [cane.current, cutout.cane],
         ] as const) {
           Object.assign(canvas, { width, height });
           canvas.getContext("2d")?.putImageData(pixels, 0, 0);
         }
-        for (const canvas of night ? canvases : [patchCanvas]) {
-          const recolour = canvas?.getContext("2d");
-          if (!canvas || !recolour) continue;
-          recolour.globalCompositeOperation = "source-in";
-          recolour.fillStyle = getComputedStyle(canvas).color;
-          recolour.fillRect(0, 0, width, height);
-        }
+        setHole(cutout.hole);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [night]);
+  }, []);
 
   const k = scale;
+  const travellerBox = {
+    width: TRAVELLER.width * k,
+    height: TRAVELLER.height * k,
+    transformOrigin: `${((TRAVELLER.feet[0] - TRAVELLER.left) / TRAVELLER.width) * 100}% ${((TRAVELLER.feet[1] - TRAVELLER.top) / TRAVELLER.height) * 100}%`,
+  };
   return (
     <section
       data-control
@@ -753,26 +792,56 @@ export function MountainPath({
         <div
           ref={world}
           className="absolute top-0 left-0 will-change-transform"
-          style={{ width: SCROLL.width * k, height: SCROLL.height * k }}
+          style={{
+            width: SCROLL.width * k,
+            height: SCROLL.height * k,
+            background: night
+              ? `linear-gradient(rgb(${PATH_NIGHT_SKY}), rgb(${PATH_NIGHT_GROUND}) 70%)`
+              : undefined,
+          }}
         >
+          {night && (
+            <div aria-hidden className="pointer-events-none absolute inset-0">
+              <Moonlight scale={k} />
+              {LIT_WINDOWS.map(([x, y], index) => (
+                <Firelight
+                  key={`${x} ${y}`}
+                  at={{ x: x * k, y: y * k }}
+                  reach={WINDOW_REACH * k}
+                  strength={0.7}
+                  waver={`${2.6 + index * 0.45}s`}
+                />
+              ))}
+              <Firelight ref={glow} reach={GLOW_REACH * k} waver="1.4s" />
+              {shown
+                .filter((tape) => breaks[tape.id] === "broken")
+                .map((tape) => (
+                  <Firelight
+                    key={tape.id}
+                    ref={(element) => {
+                      if (element) slipFirelights.current.set(tape.id, element);
+                      else slipFirelights.current.delete(tape.id);
+                    }}
+                    reach={SLIP_FIRELIGHT_REACH * k}
+                  />
+                ))}
+            </div>
+          )}
           <img
+            ref={paintingImage}
             src={painting}
             alt=""
             draggable={false}
-            className="absolute inset-0 size-full dark:brightness-90 dark:invert dark:sepia-[0.25]"
+            className="absolute inset-0 size-full data-[away=true]:[mask:var(--hole)]"
+            style={
+              {
+                "--hole": hole
+                  ? `url(${hole}) ${TRAVELLER.left * k}px ${TRAVELLER.top * k}px / ${TRAVELLER.width * k}px ${TRAVELLER.height * k}px no-repeat exclude, linear-gradient(#000, #000)`
+                  : undefined,
+              } as CSSProperties
+            }
           />
           <canvas ref={sky} aria-hidden className="pointer-events-none absolute top-0 left-0" />
-          <canvas
-            ref={patch}
-            aria-hidden
-            className="absolute text-paper opacity-0 transition-opacity duration-500"
-            style={{
-              left: TRAVELLER.left * k,
-              top: TRAVELLER.top * k,
-              width: TRAVELLER.width * k,
-              height: TRAVELLER.height * k,
-            }}
-          />
           <svg
             aria-hidden
             className="pointer-events-none absolute inset-0 size-full overflow-visible"
@@ -815,37 +884,25 @@ export function MountainPath({
               </g>
             ))}
           </svg>
-          {(Object.keys(PLACES) as PlaceName[]).map((place) => {
-            const { x, y } = pointAt(placeAt(place));
-            return (
-              <span
-                key={place}
-                aria-hidden
-                lang="zh"
-                className="pointer-events-none absolute -translate-1/2 bg-[radial-gradient(closest-side,color-mix(in_oklch,var(--paper)_80%,transparent),transparent)] px-2 py-1.5 font-brush text-[1.1rem] leading-none text-ink-soft [writing-mode:vertical-rl]"
-                style={{ left: x * k + 34, top: Math.max(36, y * k - 30) }}
-              >
-                {m.radio.pathPlaces[place]}
-              </span>
-            );
-          })}
           <div
             ref={traveller}
             aria-hidden
-            className="pointer-events-none absolute top-0 left-0 drop-shadow-[0_0_2px_var(--paper)]"
-            style={{
-              width: TRAVELLER.width * k,
-              height: TRAVELLER.height * k,
-              transformOrigin: `${((TRAVELLER.feet[0] - TRAVELLER.left) / TRAVELLER.width) * 100}% ${((TRAVELLER.feet[1] - TRAVELLER.top) / TRAVELLER.height) * 100}%`,
-            }}
+            className={cn(TRAVELLER_BOX, !night && "drop-shadow-[0_0_2px_var(--paper)]")}
+            style={travellerBox}
           >
+            {/* The paper he stands on, at night lit by his own glow. */}
             <canvas
               ref={body}
-              className="absolute inset-0 size-full bg-[radial-gradient(closest-side,var(--paper)_65%,transparent)] text-ink"
+              className="absolute inset-0 size-full"
+              style={{
+                background: night
+                  ? `radial-gradient(closest-side, rgba(${FIRELIGHT}, ${GLOW_HEART / 2}) 30%, transparent), radial-gradient(closest-side, rgb(${PATH_NIGHT_GROUND}) 40%, transparent)`
+                  : "radial-gradient(closest-side, var(--paper) 65%, transparent)",
+              }}
             />
             <canvas
               ref={cane}
-              className="absolute inset-0 size-full text-ink"
+              className="absolute inset-0 size-full"
               style={{
                 transformOrigin: `${((CANE.hand[0] - TRAVELLER.left) / TRAVELLER.width) * 100}% ${((CANE.hand[1] - TRAVELLER.top) / TRAVELLER.height) * 100}%`,
               }}
@@ -882,6 +939,7 @@ export function MountainPath({
                     tape={tape}
                     current={tape.id === playingId}
                     broken={breaks[tape.id] ?? null}
+                    burns={night}
                     onPlay={() => onPlay(tape)}
                     onHold={() => strike(tape)}
                     onMend={() => mend(tape)}
@@ -919,12 +977,172 @@ export function MountainPath({
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-3 bg-linear-to-t from-paper/90 from-40% to-transparent pt-8 pr-[max(1rem,env(safe-area-inset-right))] pb-[max(1rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))]">
         <p className="min-w-0 flex-1 text-right font-serif text-sm font-bold tracking-wide text-ink-soft">
-          {hint ?? m.radio.pathHint}
+          {hint ?? (night ? m.radio.pathHintNight : m.radio.pathHint)}
         </p>
       </div>
     </section>
   );
 }
+
+/**
+ * Firelight on the paper, `reach` px round where it is put, under the painting's ink layer as the
+ * boat's lamp is on the radio: the paper glows and the ink stays as it is.
+ */
+function Firelight({
+  ref,
+  reach,
+  at,
+  strength = 1,
+  waver,
+}: {
+  ref?: Ref<HTMLDivElement>;
+  reach: number;
+  /** Where it is put, in screen px, when it stays there; otherwise it is moved each frame. */
+  at?: { x: number; y: number };
+  /** How bright it is, against the old man's glow. */
+  strength?: number;
+  /** How long it takes to waver, for a steady light; otherwise a burning slip's flare and dying away. */
+  waver?: string;
+}) {
+  const light = (alpha: number) => `rgba(${FIRELIGHT}, ${alpha * strength})`;
+  return (
+    <div
+      ref={ref}
+      className="absolute top-0 left-0"
+      style={{
+        width: 2 * reach,
+        height: 2 * reach,
+        margin: -reach,
+        translate: at && `${at.x}px ${at.y}px`,
+      }}
+    >
+      <div
+        className={cn(
+          "size-full",
+          waver
+            ? "motion-safe:animate-[firelight-waver_var(--waver)_ease-in-out_infinite_alternate]"
+            : "motion-safe:animate-[slip-firelight_5s_linear_forwards] motion-reduce:hidden"
+        )}
+        style={
+          {
+            "--waver": waver,
+            background: `radial-gradient(closest-side, ${light(GLOW_HEART)}, ${light(0.45)} 12%, ${light(0.2)} 35%, ${light(0.06)} 65%, ${light(0)})`,
+          } as CSSProperties
+        }
+      />
+    </div>
+  );
+}
+
+/** Moonlight on the open sky between the peaks, on the paper under the ink like the firelight. */
+function Moonlight({ scale }: { scale: number }) {
+  const moon = (alpha: number) => `rgba(${MOONLIT}, ${alpha})`;
+  return (
+    <div
+      className="absolute inset-0"
+      style={{
+        background: MOONLIT_SKY.map(
+          ({ x, y, across, down }) =>
+            `radial-gradient(${across * scale}px ${down * scale}px at ${x * scale}px ${y * scale}px, ${moon(0.38)}, ${moon(0.2)} 45%, ${moon(0)})`
+        ).join(", "),
+      }}
+    />
+  );
+}
+
+/** Where a burning slip's paper is left, on a mask three times its height: above a ragged charred edge. */
+const RAGGED_EDGE = "L90 157L80 146L70 155L60 144L50 156L40 147L30 158L20 145L10 154L0 148";
+const svgUrl = (body: string) =>
+  `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 300' preserveAspectRatio='none'>${body}</svg>`)}")`;
+const BURN_MASK = svgUrl(`<path d='M0 0H100V150${RAGGED_EDGE}Z'/>`);
+/** The scorch along that edge, and the glowing line where it burns. */
+const SCORCH = svgUrl(
+  `<path d='M100 150${RAGGED_EDGE}' fill='none' stroke='rgb(40,26,16)' stroke-opacity='0.8' stroke-width='16' stroke-linejoin='round'/>` +
+    `<path d='M100 150${RAGGED_EDGE}' fill='none' stroke='rgb(240,128,44)' stroke-width='3.5' stroke-linejoin='round'/>`
+);
+/** Where the tongues of flame stand along the burning edge, across the slip. */
+const TONGUES = [
+  { left: "18%", size: 0.85, delay: "-0.2s" },
+  { left: "42%", size: 1.15, delay: "-0.5s" },
+  { left: "64%", size: 1, delay: "0s" },
+  { left: "86%", size: 0.75, delay: "-0.35s" },
+];
+
+/**
+ * A slip set alight: it burns away from the bottom up behind a charred edge with flames along
+ * it, leaving embers that fade while a tap can still bring it back; brought back, it unburns.
+ */
+function BurningSlip({ face, edge, mending }: { face: ReactNode; edge: string; mending: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "absolute inset-0 motion-reduce:opacity-40",
+        mending
+          ? "motion-safe:animate-[slip-unburn_600ms_ease-out_forwards]"
+          : "motion-safe:animate-[slip-burn_var(--burn-ms)_cubic-bezier(0.45,0,0.75,1)_forwards]"
+      )}
+      style={{ "--burn-ms": `${BURN_MS}ms` } as CSSProperties}
+    >
+      <span
+        className={cn(FACE, edge, "absolute inset-0")}
+        style={{
+          maskImage: BURN_MASK,
+          maskSize: "100% 300%",
+          maskRepeat: "no-repeat",
+          maskPosition: "0 var(--burn)",
+        }}
+      >
+        {face}
+        <span
+          className="absolute inset-0"
+          style={{
+            backgroundImage: SCORCH,
+            backgroundSize: "100% 300%",
+            backgroundRepeat: "no-repeat",
+            backgroundPosition: "0 var(--burn)",
+          }}
+        />
+      </span>
+      {!mending && (
+        <>
+          <span
+            className="absolute inset-x-0 h-0 motion-safe:animate-[flames-run_var(--burn-ms)_linear_forwards] motion-reduce:hidden"
+            style={{ bottom: "calc(2 * var(--burn) - 50%)" }}
+          >
+            {TONGUES.map(({ left, size, delay }) => (
+              <span
+                key={left}
+                className="absolute bottom-0 -translate-x-1/2 origin-bottom motion-safe:animate-[flame-flicker_0.8s_ease-in-out_var(--delay)_infinite]"
+                style={
+                  {
+                    left,
+                    width: `${0.6 * size}rem`,
+                    height: `${1.15 * size}rem`,
+                    borderRadius: "50% 50% 50% 50% / 62% 62% 38% 38%",
+                    background:
+                      "radial-gradient(ellipse 50% 60% at 50% 78%, rgb(255 236 176), rgb(248 160 56) 45%, rgb(206 72 34 / 0.85) 75%, transparent)",
+                    "--delay": delay,
+                  } as CSSProperties
+                }
+              />
+            ))}
+          </span>
+          <span
+            className="absolute inset-x-1 -bottom-0.5 h-1.5 rounded-full motion-safe:animate-[fade-away_5s_ease-in_forwards] motion-reduce:hidden"
+            style={{
+              background:
+                "radial-gradient(circle at 25% 50%, rgb(250 140 50) 0 1.5px, transparent 2px), radial-gradient(circle at 70% 40%, rgb(250 140 50) 0 1px, transparent 1.5px), rgb(62 58 54 / 0.8)",
+            }}
+          />
+        </>
+      )}
+    </span>
+  );
+}
+
+/** The old man's box, moved and turned with him each frame. */
+const TRAVELLER_BOX = "pointer-events-none absolute top-0 left-0";
 
 const FACE =
   "flex flex-col items-center gap-1 border bg-background/95 px-1.5 pt-2 pb-1.5 text-ink shadow-[1px_2px_0_color-mix(in_oklch,var(--ink)_12%,transparent)]";
@@ -934,6 +1152,7 @@ function Slip({
   tape,
   current,
   broken,
+  burns,
   onPlay,
   onHold,
   onMend,
@@ -941,6 +1160,8 @@ function Slip({
   tape: Tape;
   current: boolean;
   broken: BreakPhase | null;
+  /** Set alight by the old man, at night, rather than broken by his cane. */
+  burns: boolean;
   onPlay: () => void;
   onHold: () => void;
   onMend: () => void;
@@ -999,36 +1220,40 @@ function Slip({
       {inPieces && (
         <button
           type="button"
-          aria-label={m.radio.mend(tape.station.name)}
+          aria-label={(burns ? m.radio.unburn : m.radio.mend)(tape.station.name)}
           disabled={broken !== "broken"}
           className="absolute inset-0 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ink"
           onPointerDown={(event) => event.stopPropagation()}
           onClick={onMend}
         >
-          {SHARDS.map((shard) => (
-            <span
-              key={shard.clip}
-              aria-hidden
-              className={cn(
-                FACE,
-                edge,
-                "absolute inset-0",
-                broken === "broken"
-                  ? "motion-safe:animate-[shard-break_700ms_cubic-bezier(0.2,0.7,0.4,1)_forwards,fade-away_5s_linear_forwards] motion-reduce:opacity-40"
-                  : "motion-safe:animate-[shard-mend_600ms_ease-out_backwards]"
-              )}
-              style={
-                {
-                  clipPath: shard.clip,
-                  "--shard-x": shard.x,
-                  "--shard-y": shard.y,
-                  "--shard-turn": shard.turn,
-                } as CSSProperties
-              }
-            >
-              {face}
-            </span>
-          ))}
+          {burns ? (
+            <BurningSlip face={face} edge={edge} mending={broken === "mending"} />
+          ) : (
+            SHARDS.map((shard) => (
+              <span
+                key={shard.clip}
+                aria-hidden
+                className={cn(
+                  FACE,
+                  edge,
+                  "absolute inset-0",
+                  broken === "broken"
+                    ? "motion-safe:animate-[shard-break_700ms_cubic-bezier(0.2,0.7,0.4,1)_forwards,fade-away_5s_linear_forwards] motion-reduce:opacity-40"
+                    : "motion-safe:animate-[shard-mend_600ms_ease-out_backwards]"
+                )}
+                style={
+                  {
+                    clipPath: shard.clip,
+                    "--shard-x": shard.x,
+                    "--shard-y": shard.y,
+                    "--shard-turn": shard.turn,
+                  } as CSSProperties
+                }
+              >
+                {face}
+              </span>
+            ))
+          )}
         </button>
       )}
     </div>

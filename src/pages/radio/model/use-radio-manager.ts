@@ -68,16 +68,12 @@ export function useRadioManager() {
     return () => clearTimeout(timer);
   }, [hint]);
 
-  // The station to go back to after listening to a recording.
-  const lastLive = useRef<Station | null>(null);
-  useEffect(() => {
-    if (player.source === "station" && player.station) lastLive.current = player.station;
-  }, [player.source, player.station]);
-
   // Before anything plays, the radio shows the first preset, or else the first station of the category.
   const firstPreset = presets.slots.find((slot) => slot.station)?.station ?? null;
   const station = player.station ?? firstPreset ?? dial[0] ?? order[0] ?? null;
   const tape = (mode === "playback" || mode === "paused") && deck ? deck.tape : null;
+  // The radio's station when the mountain path opened, to play again once it closes.
+  const radioStation = useRef<Station | null>(null);
 
   const remove = useMutation({
     mutationFn: (id: string) => commands.deleteTape(id),
@@ -164,9 +160,16 @@ export function useRadioManager() {
       remove.mutate(doomed.id);
     },
 
-    backToLive: () => {
-      const live = lastLive.current ?? station;
-      if (live) void playStation(live);
+    openRecordings: () => {
+      radioStation.current = station;
+    },
+
+    /** Recordings play only on the mountain path: leaving it, the radio plays its station again. */
+    leaveRecordings: () => {
+      if (!playerAtom.get().deck) return;
+      unloadTape();
+      const back = radioStation.current ?? station;
+      if (back) void playStation(back);
     },
 
     playPreset: (key: number) => {

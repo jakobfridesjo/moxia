@@ -4,6 +4,7 @@ import { makeStation, makeTape } from "@/shared/test/fixtures.ts";
 import { callsTo, mockCommands, sendToChannel } from "@/shared/test/tauri.ts";
 import type { Station } from "@/shared/api/commands.ts";
 import { captionsAtom } from "@/features/player/model/subtitles.ts";
+import { themeAtom } from "@/shared/config/preferences.ts";
 import { renderRoute } from "@/app/testing/router.tsx";
 
 const beijing = makeStation({ id: "bj", name: "中国之声", countryCode: "CN", state: "北京" });
@@ -147,7 +148,7 @@ describe("the radio", () => {
       .toBeInTheDocument();
   });
 
-  it("plays a recording on the mountain path and goes back to the radio", async () => {
+  it("plays a recording on the mountain path, and the radio again once the path is left", async () => {
     const tape = makeTape({ id: "t1", station: hongKong, recordedAt: "2026-11-08T07:30:00Z" });
     const calls = radioCommands({ list_tapes: () => [tape], play_tape: () => 0 });
     await renderRoute("/");
@@ -160,10 +161,10 @@ describe("the radio", () => {
       .toBeVisible();
 
     await screen.getByRole("button", { name: "Roll up the scroll" }).click();
-    await expect.poll(() => inscription().element().textContent).toContain("香港电台");
-
-    await screen.getByRole("button", { name: "Back to the radio" }).click();
-    await expect.poll(() => callsTo(calls, "play").length).toBe(1);
+    await expect
+      .poll(() => callsTo(calls, "play").map((args) => (args.station as Station).id))
+      .toEqual(["bj"]);
+    await expect.poll(() => inscription().element().textContent).toContain("中国之声");
   });
 
   it("opens the mountain path on its own screen and leaves it", async () => {
@@ -186,6 +187,8 @@ describe("the radio", () => {
     "has the old man break a held recording with his cane, and deletes it once the scroll is rolled up",
     { timeout: 10_000 },
     async () => {
+      // By day; at night he burns it instead.
+      themeAtom.set("day");
       const tape = makeTape({ id: "t1", station: hongKong });
       const calls = radioCommands({ list_tapes: () => [tape], delete_tape: () => null });
       await renderRoute("/");
@@ -219,6 +222,7 @@ describe("the radio", () => {
     "mends a broken recording when its pieces are tapped, keeping it",
     { timeout: 10_000 },
     async () => {
+      themeAtom.set("day");
       const tape = makeTape({ id: "t1", station: hongKong });
       const calls = radioCommands({ list_tapes: () => [tape], delete_tape: () => null });
       await renderRoute("/");
@@ -229,6 +233,28 @@ describe("the radio", () => {
       await expect.element(pieces, { timeout: 5000 }).toBeVisible();
       (pieces.element() as HTMLElement).click();
       await expect.element(pieces).not.toBeInTheDocument();
+      await expect.element(screen.getByRole("button", { name: /^Play 香港电台/ })).toBeVisible();
+
+      await screen.getByRole("button", { name: "Roll up the scroll" }).click();
+      expect(callsTo(calls, "delete_tape")).toEqual([]);
+    }
+  );
+
+  it(
+    "at night has the old man set a held recording alight, and brings it back from the ashes when tapped",
+    { timeout: 10_000 },
+    async () => {
+      themeAtom.set("night");
+      const tape = makeTape({ id: "t1", station: hongKong });
+      const calls = radioCommands({ list_tapes: () => [tape], delete_tape: () => null });
+      await renderRoute("/");
+
+      await screen.getByRole("button", { name: "Recordings" }).click();
+      hold(screen.getByRole("button", { name: /^Play 香港电台/ }).element());
+      const ashes = screen.getByRole("button", { name: "Bring 香港电台 back from the ashes" });
+      await expect.element(ashes, { timeout: 5000 }).toBeVisible();
+      (ashes.element() as HTMLElement).click();
+      await expect.element(ashes).not.toBeInTheDocument();
       await expect.element(screen.getByRole("button", { name: /^Play 香港电台/ })).toBeVisible();
 
       await screen.getByRole("button", { name: "Roll up the scroll" }).click();

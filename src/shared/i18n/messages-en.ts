@@ -37,7 +37,6 @@ export const en = {
     seals: {
       rec: "录",
       path: "山",
-      live: "播",
       settings: "设",
       subtitles: "字",
       together: "同",
@@ -72,7 +71,6 @@ export const en = {
       stopRecording: "Stop recording",
       recordings: "Recordings",
       leavePath: "Roll up the scroll",
-      live: "Back to the radio",
       settings: "Settings",
       subtitlesOn: "Turn subtitles on",
       subtitlesOff: "Turn subtitles off",
@@ -97,14 +95,17 @@ export const en = {
     /** The scroll's own inscription, Chinese whatever the interface language. */
     pathInscription: "山行",
     /** Places on the painting along the path, Chinese whatever the interface language. */
-    pathPlaces: { bridge: "橋", village: "村", monastery: "古寺", waterfall: "瀑", peak: "峰頂" },
     pathHint:
       "Drag to climb · tap a recording to play it · hold it and the old man breaks it with his cane",
+    pathHintNight:
+      "Drag to climb · tap a recording to play it · hold it and the old man sets it alight",
     noRecordings: "No recordings yet. Press 录 while a station plays.",
     playRecording: (name: string, date: string, length: string) =>
       `Play ${name}, recorded ${date}, ${length}. Hold to delete.`,
     mend: (name: string) => `Mend ${name}`,
     mendHint: "Tap the pieces to mend it",
+    unburn: (name: string) => `Bring ${name} back from the ashes`,
+    unburnHint: "Tap the ashes to bring it back",
     deleted: "Recording deleted",
     deleteFailed: "Could not delete the recording",
     presetEmpty: (key: number) => `Preset ${key} is empty. Hold it to store the station on air.`,
@@ -189,7 +190,7 @@ export const en = {
     themeOptions: { auto: "Auto", day: "Day", night: "Night" },
     keySounds: "Key sounds",
     keySoundsDescription:
-      "The clack of mahjong tiles when you press one of the radio's seals, and the crack of the old man's cane breaking a recording.",
+      "The clack of mahjong tiles when you press one of the radio's seals, and the crack of the old man's cane breaking a recording, or the rush of flame as he sets one alight.",
     switchOptions: { on: "On", off: "Off" },
     environment: "Weather",
     environmentDescription:

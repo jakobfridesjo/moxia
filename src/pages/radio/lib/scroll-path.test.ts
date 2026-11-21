@@ -7,7 +7,6 @@ import {
   travellerPart,
   clampToPath,
   pathData,
-  placeAt,
   pointAt,
   slotAt,
 } from "./scroll-path.ts";
@@ -18,12 +17,6 @@ describe("the path up the scroll", () => {
     expect(start.x).toBeCloseTo(TRAVELLER.feet[0]);
     expect(start.y).toBeCloseTo(TRAVELLER.feet[1]);
     expect(pointAt(PATH_LENGTH).y).toBeLessThan(100);
-  });
-
-  it("passes the village, then the monastery, then the waterfall, then the peak", () => {
-    const order = (["bridge", "village", "monastery", "waterfall", "peak"] as const).map(placeAt);
-    expect(order).toEqual([...order].sort((a, b) => a - b));
-    expect(pointAt(placeAt("monastery")).y).toBeLessThan(pointAt(placeAt("village")).y);
   });
 
   it("heads along a unit vector", () => {

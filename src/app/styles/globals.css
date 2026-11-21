@@ -317,6 +317,105 @@ html.scanning body > :not([data-scanner]) {
   }
 }
 
+/* At night the old man sets a slip alight: how far up it has burnt, as the place of its
+   charred edge on a mask three times the slip's height (`BURN_MASK` in MountainPath.tsx). */
+@property --burn {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 20%;
+}
+
+@keyframes slip-burn {
+  from {
+    --burn: 20%;
+  }
+  to {
+    --burn: 80%;
+  }
+}
+
+/* Brought back from the ashes: the slip unburns, top to bottom. */
+@keyframes slip-unburn {
+  from {
+    --burn: 80%;
+  }
+  to {
+    --burn: 20%;
+  }
+}
+
+/* The flames along a burning edge flare up, run their course and go out. */
+@keyframes flames-run {
+  0% {
+    opacity: 0;
+  }
+  10%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* A tongue of flame: it leaps, leans and shrinks, never quite the same twice. */
+@keyframes flame-flicker {
+  0%,
+  100% {
+    scale: 1 1;
+    rotate: -2deg;
+  }
+  30% {
+    scale: 0.88 1.14;
+    rotate: 3deg;
+  }
+  55% {
+    scale: 1.06 0.9;
+    rotate: -4deg;
+  }
+  80% {
+    scale: 0.94 1.06;
+    rotate: 2deg;
+  }
+}
+
+/* Lamplight lying behind the painting's ink: it wavers, just. */
+@keyframes firelight-waver {
+  0% {
+    opacity: 0.94;
+    scale: 1;
+  }
+  30% {
+    opacity: 1;
+    scale: 1.015;
+  }
+  65% {
+    opacity: 0.91;
+    scale: 0.99;
+  }
+  100% {
+    opacity: 0.97;
+    scale: 1.005;
+  }
+}
+
+/* A burning slip's light: it flares as the paper catches and dies to embers. */
+@keyframes slip-firelight {
+  0% {
+    opacity: 0;
+  }
+  8%,
+  45% {
+    opacity: 1;
+  }
+  65% {
+    opacity: 0.3;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 /* Ink soaking up a seal held down long enough to store. */
 @keyframes seal-rise {
   from {

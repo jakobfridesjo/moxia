@@ -37,7 +37,6 @@ export const zhHans: Messages = {
     seals: {
       rec: "录",
       path: "山",
-      live: "播",
       settings: "设",
       subtitles: "字",
       together: "同",
@@ -72,7 +71,6 @@ export const zhHans: Messages = {
       stopRecording: "停止录音",
       recordings: "录音",
       leavePath: "卷起画轴",
-      live: "回到收音机",
       settings: "设置",
       subtitlesOn: "打开字幕",
       subtitlesOff: "关闭字幕",
@@ -96,13 +94,15 @@ export const zhHans: Messages = {
     /** The scroll's own inscription, Chinese whatever the interface language. */
     pathInscription: "山行",
     /** Places on the painting along the path, Chinese whatever the interface language. */
-    pathPlaces: { bridge: "橋", village: "村", monastery: "古寺", waterfall: "瀑", peak: "峰頂" },
     pathHint: "拖动登山 · 点一段录音播放 · 长按让老人用拐杖把它敲碎",
+    pathHintNight: "拖动登山 · 点一段录音播放 · 长按让老人把它点燃",
     noRecordings: "还没有录音。电台播放时按“录”。",
     playRecording: (name: string, date: string, length: string) =>
       `播放${name}，录于 ${date}，${length}。长按删除。`,
     mend: (name: string) => `把${name}拼回来`,
     mendHint: "点一下碎片就能拼回来",
+    unburn: (name: string) => `把${name}从灰烬里找回来`,
+    unburnHint: "点一下灰烬就能找回来",
     deleted: "录音已删除",
     deleteFailed: "无法删除录音",
     presetEmpty: (key: number) => `预设 ${key} 是空的。长按存入正在播放的电台。`,
@@ -183,7 +183,7 @@ export const zhHans: Messages = {
     themeOptions: { auto: "自动", day: "昼", night: "夜" },
     keySounds: "按键声音",
     keySoundsDescription:
-      "按下收音机上的印章时，发出麻将牌相碰的声音；老人用拐杖敲碎录音时，啪的一声。",
+      "按下收音机上的印章时，发出麻将牌相碰的声音；老人用拐杖敲碎录音时，啪的一声；点燃录音时，呼的一声。",
     switchOptions: { on: "开", off: "关" },
     environment: "天气",
     environmentDescription:

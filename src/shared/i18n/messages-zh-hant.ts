@@ -38,7 +38,6 @@ export const zhHant: Messages = {
     seals: {
       rec: "錄",
       path: "山",
-      live: "播",
       settings: "設",
       subtitles: "字",
       together: "同",
@@ -60,7 +59,6 @@ export const zhHant: Messages = {
       stopRecording: "停止錄音",
       recordings: "錄音",
       leavePath: "捲起畫軸",
-      live: "回到收音機",
       settings: "設定",
       subtitlesOn: "開啟字幕",
       subtitlesOff: "關閉字幕",
@@ -82,13 +80,15 @@ export const zhHant: Messages = {
     endOfRecording: "回放結束",
     pathTitle: "山路上的錄音",
     pathInscription: zhHans.radio.pathInscription,
-    pathPlaces: zhHans.radio.pathPlaces,
     pathHint: "拖動登山 · 點一段錄音播放 · 長按讓老人用柺杖把它敲碎",
+    pathHintNight: "拖動登山 · 點一段錄音播放 · 長按讓老人把它點燃",
     noRecordings: "還沒有錄音。電臺播放時按「錄」。",
     playRecording: (name: string, date: string, length: string) =>
       `播放${name}，錄於 ${date}，${length}。長按刪除。`,
     mend: (name: string) => `把${name}拼回來`,
     mendHint: "點一下碎片就能拼回來",
+    unburn: (name: string) => `把${name}從灰燼裡找回來`,
+    unburnHint: "點一下灰燼就能找回來",
     deleted: "錄音已刪除",
     deleteFailed: "無法刪除錄音",
     presetEmpty: (key: number) => `預設 ${key} 是空的。長按存入正在播放的電臺。`,
@@ -169,7 +169,7 @@ export const zhHant: Messages = {
     themeOptions: { auto: "自動", day: "晝", night: "夜" },
     keySounds: "按鍵聲音",
     keySoundsDescription:
-      "按下收音機上的印章時，發出麻將牌相碰的聲音；老人用柺杖敲碎錄音時，啪的一聲。",
+      "按下收音機上的印章時，發出麻將牌相碰的聲音；老人用柺杖敲碎錄音時，啪的一聲；點燃錄音時，呼的一聲。",
     switchOptions: { on: "開", off: "關" },
     environment: "天氣",
     environmentDescription:

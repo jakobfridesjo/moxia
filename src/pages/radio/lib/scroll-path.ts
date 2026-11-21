@@ -41,9 +41,22 @@ const WAYPOINTS: readonly (readonly [number, number])[] = [
   [409, 76],
 ];
 
-/** Places on the way, by the waypoint they stand at. */
-export const PLACES = { bridge: 1, village: 10, monastery: 19, waterfall: 21, peak: 27 } as const;
-export type PlaceName = keyof typeof PLACES;
+/** Where lamplight shows in the houses at night: the two huts by the trees, the village, the monastery's two halls. */
+export const LIT_WINDOWS: readonly (readonly [number, number])[] = [
+  [1110, 2800],
+  [1115, 2945],
+  [415, 2575],
+  [1000, 1330],
+  [1200, 1495],
+];
+
+/** The open sky the moon lights at night, as ellipses: left of the peaks, the gap between them, and right over the poem. */
+export const MOONLIT_SKY = [
+  { x: 90, y: 450, across: 170, down: 520 },
+  { x: 720, y: 260, across: 110, down: 320 },
+  { x: 1180, y: 280, across: 320, down: 330 },
+  { x: 950, y: 650, across: 220, down: 140 },
+] as const;
 
 /** The old man standing on the bridge, who walks to the recording that plays. */
 export const TRAVELLER = {
@@ -158,9 +171,6 @@ export function pointAt(at: number) {
     dy: (b.y - a.y) / span,
   };
 }
-
-/** How far along the path a place on the painting stands. */
-export const placeAt = (place: PlaceName) => POINTS[PLACES[place] * STEPS_PER_LEG].at;
 
 /**
  * Where the recording `index` places from the newest stands, among `count`: the newest

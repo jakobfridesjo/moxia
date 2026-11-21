@@ -38,7 +38,7 @@ export const DAY_TONE: Tone = {
   fallen: null,
 };
 
-const MOONLIT = "176,188,206";
+export const MOONLIT = "176,188,206";
 
 /**
  * Night over the radio's paintings: their ink stays black under the moon, writing over them is pale
@@ -59,17 +59,14 @@ export const NIGHT_TONE: Tone = {
   fallen: MOONLIT,
 };
 
-const PALE_INK = "232,222,204";
+/** The mountain path's paper at night, moonlit from above, as "r,g,b": its top and its foot. */
+export const PATH_NIGHT_SKY = "74,80,94";
+export const PATH_NIGHT_GROUND = "46,50,60";
+/** The glow round the old man at night, the houses' lamplight and a burning slip's, as warm as the boat's lamp by the river. */
+export const FIRELIGHT = "255,138,42";
 
-/** Night on the mountain path, whose painting turns pale on dark paper: its weather turns with it. */
-export const PATH_NIGHT_TONE: Tone = {
-  ink: PALE_INK,
-  light: PALE_INK,
-  writing: PALE_INK,
-  paper: "29,26,23",
-  mist: "58,60,66",
-  mistAlpha: 0.8,
-  mistSoftness: 0,
-  smoke: { wisp: "58,60,66", puff: PALE_INK, alpha: 1, body: 1 },
-  fallen: PALE_INK,
-};
+/**
+ * Night on the mountain path: its ink stays black on paper dimmed by the moon, as on the radio's
+ * paintings, and its weather takes the radio's night colours; mist closes over it in the paper's own.
+ */
+export const PATH_NIGHT_TONE: Tone = { ...NIGHT_TONE, paper: PATH_NIGHT_GROUND };

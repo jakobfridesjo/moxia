@@ -38,7 +38,6 @@ export const sv: Messages = {
     seals: {
       rec: "录",
       path: "山",
-      live: "播",
       settings: "设",
       subtitles: "字",
       together: "同",
@@ -73,7 +72,6 @@ export const sv: Messages = {
       stopRecording: "Sluta spela in",
       recordings: "Inspelningar",
       leavePath: "Rulla ihop rullen",
-      live: "Tillbaka till radion",
       settings: "Inställningar",
       subtitlesOn: "Slå på undertexter",
       subtitlesOff: "Slå av undertexter",
@@ -97,14 +95,17 @@ export const sv: Messages = {
     /** The scroll's own inscription, Chinese whatever the interface language. */
     pathInscription: "山行",
     /** Places on the painting along the path, Chinese whatever the interface language. */
-    pathPlaces: { bridge: "橋", village: "村", monastery: "古寺", waterfall: "瀑", peak: "峰頂" },
     pathHint:
       "Dra för att klättra · tryck på en inspelning för att spela den · håll in den så slår gubben sönder den med käppen",
+    pathHintNight:
+      "Dra för att klättra · tryck på en inspelning för att spela den · håll in den så tänder gubben eld på den",
     noRecordings: "Inga inspelningar än. Tryck på 录 medan en station spelar.",
     playRecording: (name: string, date: string, length: string) =>
       `Spela ${name}, inspelad ${date}, ${length}. Håll in för att radera.`,
     mend: (name: string) => `Laga ${name}`,
     mendHint: "Tryck på bitarna för att laga den",
+    unburn: (name: string) => `Ta tillbaka ${name} ur askan`,
+    unburnHint: "Tryck på askan för att ta tillbaka den",
     deleted: "Inspelningen är raderad",
     deleteFailed: "Kunde inte radera inspelningen",
     presetEmpty: (key: number) =>
@@ -189,7 +190,7 @@ export const sv: Messages = {
     themeOptions: { auto: "Auto", day: "Dag", night: "Natt" },
     keySounds: "Knappljud",
     keySoundsDescription:
-      "Ett klapper av mahjongbrickor när du trycker på ett av radions sigill, och smällen när gubbens käpp slår sönder en inspelning.",
+      "Ett klapper av mahjongbrickor när du trycker på ett av radions sigill, och smällen när gubbens käpp slår sönder en inspelning, eller suset när han tänder eld på en.",
     switchOptions: { on: "På", off: "Av" },
     environment: "Väder",
     environmentDescription:
