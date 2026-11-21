@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/solid-query";
 import type { Station } from "@/shared/api/commands.ts";
 import { recentQuery } from "@/shared/api/queries.ts";
 import { playStation } from "@/features/player/model/player-store.ts";

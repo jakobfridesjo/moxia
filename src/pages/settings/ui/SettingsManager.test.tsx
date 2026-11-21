@@ -7,7 +7,7 @@ import SettingsManager from "@/pages/settings/ui/SettingsManager.tsx";
 
 describe("SettingsManager", () => {
   it("translates the interface and formats numbers for the chosen language", async () => {
-    await renderPageInRouter(<SettingsManager />);
+    await renderPageInRouter(() => <SettingsManager />);
 
     await screen.getByRole("button", { name: "Svenska" }).click();
 
@@ -28,7 +28,7 @@ describe("SettingsManager", () => {
   });
 
   it("keeps one option chosen", async () => {
-    await renderPageInRouter(<SettingsManager />);
+    await renderPageInRouter(() => <SettingsManager />);
 
     const on = screen
       .getByRole("group", { name: "Key sounds" })
@@ -43,7 +43,7 @@ describe("SettingsManager", () => {
   });
 
   it("turns the shaders off", async () => {
-    await renderPageInRouter(<SettingsManager />);
+    await renderPageInRouter(() => <SettingsManager />);
 
     await screen
       .getByRole("group", { name: "Shaders" })
@@ -61,7 +61,7 @@ describe("SettingsManager", () => {
   });
 
   it("links to the about page", async () => {
-    const { router } = await renderPageInRouter(<SettingsManager />);
+    const { router } = await renderPageInRouter(() => <SettingsManager />);
 
     await screen.getByRole("link", { name: "About Moxia" }).click();
 

@@ -8,7 +8,6 @@
     "coverage",
     "mise.toml",
     "src/app/routeTree.gen.ts",
-    "src/pages/about/model/third-party-licenses.gen.json",
-    "src/shared/ui/shadcn/**"
+    "src/pages/about/model/third-party-licenses.gen.json"
   ]
 }

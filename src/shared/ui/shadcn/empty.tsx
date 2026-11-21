@@ -1,27 +1,33 @@
-import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "@/shared/lib/class-names.ts"
+import type { ComponentProps } from "@solidjs/web";
+import { omit } from "solid-js";
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "@/shared/lib/class-names.ts";
 
-function Empty({ className, ...props }: React.ComponentProps<"div">) {
+type DivProps = Omit<ComponentProps<"div">, "class"> & { class?: string };
+
+function Empty(props: DivProps) {
+  const rest = omit(props, "class");
   return (
     <div
       data-slot="empty"
-      className={cn(
+      {...rest}
+      class={cn(
         "flex w-full min-w-0 flex-1 flex-col items-center justify-center gap-4 rounded-3xl border-dashed p-12 text-center text-balance",
-        className
+        props.class
       )}
-      {...props}
     />
-  )
+  );
 }
 
-function EmptyHeader({ className, ...props }: React.ComponentProps<"div">) {
+function EmptyHeader(props: DivProps) {
+  const rest = omit(props, "class");
   return (
     <div
       data-slot="empty-header"
-      className={cn("flex max-w-sm flex-col items-center gap-2", className)}
-      {...props}
+      {...rest}
+      class={cn("flex max-w-sm flex-col items-center gap-2", props.class)}
     />
-  )
+  );
 }
 
 const emptyMediaVariants = cva(
@@ -37,67 +43,57 @@ const emptyMediaVariants = cva(
       variant: "default",
     },
   }
-)
+);
 
-function EmptyMedia({
-  className,
-  variant = "default",
-  ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof emptyMediaVariants>) {
+function EmptyMedia(props: DivProps & VariantProps<typeof emptyMediaVariants>) {
+  const rest = omit(props, "class", "variant");
   return (
     <div
       data-slot="empty-icon"
-      data-variant={variant}
-      className={cn(emptyMediaVariants({ variant, className }))}
-      {...props}
+      data-variant={props.variant ?? "default"}
+      {...rest}
+      class={cn(emptyMediaVariants({ variant: props.variant }), props.class)}
     />
-  )
+  );
 }
 
-function EmptyTitle({ className, ...props }: React.ComponentProps<"div">) {
+function EmptyTitle(props: DivProps) {
+  const rest = omit(props, "class");
   return (
     <div
       data-slot="empty-title"
-      className={cn(
-        "font-heading text-lg font-medium tracking-tight",
-        className
-      )}
-      {...props}
+      {...rest}
+      class={cn("font-heading text-lg font-medium tracking-tight", props.class)}
     />
-  )
+  );
 }
 
-function EmptyDescription({ className, ...props }: React.ComponentProps<"p">) {
+function EmptyDescription(props: DivProps) {
+  const rest = omit(props, "class");
   return (
     <div
       data-slot="empty-description"
-      className={cn(
+      {...rest}
+      class={cn(
         "text-sm/relaxed text-muted-foreground [&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary",
-        className
+        props.class
       )}
-      {...props}
     />
-  )
+  );
 }
 
-function EmptyContent({ className, ...props }: React.ComponentProps<"div">) {
+function EmptyContent(props: DivProps) {
+  const rest = omit(props, "class");
   return (
     <div
       data-slot="empty-content"
-      className={cn(
+      {...rest}
+      class={cn(
         "flex w-full max-w-sm min-w-0 flex-col items-center gap-4 text-sm text-balance",
-        className
+        props.class
       )}
-      {...props}
     />
-  )
+  );
 }
 
-export {
-  Empty,
-  EmptyHeader,
-  EmptyTitle,
-  EmptyDescription,
-  EmptyContent,
-  EmptyMedia,
-}
+export { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent, EmptyMedia };

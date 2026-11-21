@@ -153,8 +153,10 @@ for (const { id, text, used_by } of rust.licenses) {
   for (const { crate } of used_by) add(id, text.trim(), `${crate.name} ${crate.version}`);
 }
 
-// npm: the runtime dependencies. `shadcn` is a CLI the app takes only a stylesheet from.
-const cliOnly = new Set(["shadcn"]);
+// shadcn: the stylesheet copied from it, and the look of the components written after it.
+add("MIT", readFileSync("src/app/styles/shadcn/LICENSE", "utf8").trim(), "shadcn");
+
+// npm: the runtime dependencies.
 const seen = new Set();
 const visit = (dependencies = {}) => {
   for (const [name, { version, path, dependencies: children }] of Object.entries(dependencies)) {
@@ -164,7 +166,7 @@ const visit = (dependencies = {}) => {
     const files = readdirSync(path).filter((file) => /^(licen[cs]e|copying|notice|ofl)/i.test(file)).sort();
     const text = files.map((file) => readFileSync(join(path, file), "utf8").trim()).join("\n\n");
     add(manifest.license ?? "UNKNOWN", text, `${name} ${version}`);
-    if (!cliOnly.has(name)) visit(children);
+    visit(children);
   }
 };
 visit(JSON.parse(run("pnpm", ["list", "--prod", "--json", "--depth", "Infinity"]))[0].dependencies);
@@ -236,7 +238,7 @@ dir = "src-tauri"
 run = "cargo test -p radio-core"
 
 [tasks."perf:web"]
-description = "Measure frame times, main-thread load, React renders and hot functions on the radio, in headless Chromium (test-results/perf/)"
+description = "Measure frame times, main-thread load and hot functions on the radio, in headless Chromium (test-results/perf/)"
 env = { PERF = "1" }
 run = [
   "pnpm exec vitest run --project perf",

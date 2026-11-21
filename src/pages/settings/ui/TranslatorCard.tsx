@@ -15,7 +15,7 @@ export function TranslatorCard() {
   const translator = useModelSettings("translator");
 
   return (
-    <Card className="w-full max-w-2xl shrink-0">
+    <Card class="w-full max-w-2xl shrink-0">
       <CardHeader>
         <CardTitle>{m.translator.title}</CardTitle>
         <CardDescription>{m.translator.description}</CardDescription>

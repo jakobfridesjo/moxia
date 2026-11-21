@@ -13,15 +13,5 @@
   "[json][jsonc][css]": {
     "editor.defaultFormatter": "oxc.oxc-vscode",
     "editor.formatOnSave": true
-  },
-  "tailwindCSS.files.exclude": [
-    "**/.git/**",
-    "**/node_modules/**",
-    "**/.hg/**",
-    "**/.svn/**",
-    "src/components/ui/*.js",
-    "src/components/ui/*.jsx",
-    "src/components/ui/*.ts",
-    "src/components/ui/*.tsx"
-  ]
+  }
 }

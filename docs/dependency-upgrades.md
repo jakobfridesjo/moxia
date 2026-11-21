@@ -26,7 +26,12 @@ For a new Rust major (or a new minor of a `0.x` crate), raise its version in the
 Some packages are released together and must stay on the same version:
 
 - `tract-onnx` and `tract-linalg`
+- `solid-js` and `@solidjs/web`
 - the `tauri` crates, `@tauri-apps/api` and the `@tauri-apps/plugin-*` packages
+
+## Solid 2 prereleases
+
+Solid 2 is stable, but some libraries support it only in a prerelease, pinned to an exact version in `package.json`: `@tanstack/solid-router` and its devtools (rc), `@tanstack/solid-query` and its devtools (rc), `@kobalte/core` (alpha). `pnpm up --latest` leaves a prerelease alone, or moves it to the last stable release, which is for Solid 1: raise each by hand (`pnpm view <package> dist-tags`), read its changelog, and move it to the stable release once there is one.
 
 ## New licences
 

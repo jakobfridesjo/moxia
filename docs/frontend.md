@@ -34,11 +34,23 @@ import { useRadioManager } from "@/pages/radio/model/use-radio-manager.ts";
 
 `pages/radio` is the reference slice.
 
+## Solid
+
+The frontend is [Solid](https://docs.solidjs.com/) 2. `node_modules/solid-js/CHEATSHEET.md` lists what differs from Solid 1 and from React; these are the habits this code keeps to:
+
+- A component runs once. What changes is read where it is used: in JSX, a `createMemo`, or an effect's first function. Never destructure `props`.
+- A `model/use-<x>.ts` hook returns an object of getters (`get mode() { return mode(); }`), so `radio.mode` in JSX follows the radio; pass such objects on whole, and pass accessors (`() => value`) where a hook needs a value that changes.
+- `createEffect(compute, apply)`: what `compute` reads decides when `apply` runs, and `apply` runs again whenever `compute` does, equal value or not. Read props and derived values through a `createMemo` there, or the effect repeats on every unrelated change. `apply` returns its cleanup. For work done once the component is on the page, `onSettled`.
+- An element is kept with `ref={(element) => (box = element)}`; the short `ref={box}` hides the assignment from the linter.
+- Solid Dev warns `STRICT_READ_UNTRACKED` in the console (and in test output) for a changing value read where it will not update. Fix the read; `untrack` only where once is meant.
+- ARIA states are written `"true"` or `"false"` (`ariaBoolean` in `shared/lib/aria.ts`), attributes in lowercase (`maxlength`, `for`, `stroke-width`), and `class` takes a string, an array or an object.
+
 ## Calling Rust
 
 - Every call goes through `commands` in `shared/api/commands.ts`. Never call `invoke` anywhere else.
 - Show a failed command with `commandErrorMessage(error, fallback)`.
 - Query options and keys live in `shared/api/queries.ts`. See [architecture.md](architecture.md#the-command-contract) for which settings belong in a key.
+- Read a query with `useCommandQuery(options)` from the same file, not Solid Query's `useQuery`: its `data` is the plain value in the cache, undefined until fetched. `useQuery`'s own `data` holds its reader (and the page around it) back until the fetch lands, and is a store rather than the value Rust sent.
 - A mutation updates or invalidates the queries it changes itself (see `pages/radio/model/use-presets.ts`).
 
 ## Player
@@ -46,7 +58,7 @@ import { useRadioManager } from "@/pages/radio/model/use-radio-manager.ts";
 - `features/player/model/player-store.ts` holds what plays in `playerAtom`. Rust reports through `play`'s channel, and `applyPlayerEvent` folds each `PlayerEvent` into the state.
 - Start playback with `usePlayStation()`: it also refreshes the recent list.
 - The player store also holds the recording and the tape in the deck (`deck`), which is what a recording plays back from. The tape's position is computed from when it started moving (`deckPosition`), so nothing ticks unless a component asks with `useNow`.
-- `level` events go to `levelAtom`, not `playerAtom`, so they re-render nothing: the radio's painting reads it every frame.
+- `level` events go to `levelAtom`, not `playerAtom`, so nothing reactive follows them: the radio's painting reads it every frame.
 - Anything that can end a recording bumps `tapesChangedAtom`; `useTapes()` refetches the tape list when it does.
 
 ## The radio
@@ -82,26 +94,25 @@ import { useRadioManager } from "@/pages/radio/model/use-radio-manager.ts";
 
 - **UI text** lives in `shared/i18n/messages-{en,sv,zh-hans,zh-hant}.ts`. Never hard-code a user-facing string. Chinese is two interface languages, `zh-Hans` and `zh-Hant` (Taiwan usage: 設定, 下載, 電臺); they share what is Chinese whatever the interface language, except that the traditional radicals replace the simplified ones (訁 for 讠).
   - English defines the `Messages` type; the others must match it.
-  - Read it with `useMessages()`, or `currentMessages()` outside a render (e.g. the player store).
+  - Read it with `useMessages()`, whose sections follow the language where they are read (`m.common.back` in JSX), or `currentMessages()` outside a component (e.g. the player store).
 - **Numbers and dates** follow the language through `appLocale()`.
 - **Chinese text** gets `lang="zh"`, so the webview shapes it as Chinese.
-- **Settings** are persisted atoms in `shared/config/preferences.ts`, read with `useSelector`. The weather setting (`environmentAtom`) stops the ambient weather and the day's light on the painting and the path; the night's lights, the veil over silence and the gust on a station change stay. Turning shaders off turns all of them off, except the night's lights, which then hold still, and greys out the weather setting.
-- **Model downloads** run through `shared/api/model-downloads.ts`, whose atom keeps each download's progress outside React, so it carries on while the listener goes back to the radio. Settings' subtitles card downloads, cancels and deletes the speech models, and turns subtitles on once they arrive; the translation card does the same for the translator. Both use `ModelSection` and `useModelSettings` (`pages/settings`).
+- **Settings** are persisted atoms (`shared/lib/atom.ts`) in `shared/config/preferences.ts`. An atom is a signal: a component reads it by calling it (`themeAtom()`) in JSX, a memo or an effect. A signal shows a write only after Solid's next flush, so code outside the components, which reads what it has just written, uses `get`, `set` and `subscribe`. The weather setting (`environmentAtom`) stops the ambient weather and the day's light on the painting and the path; the night's lights, the veil over silence and the gust on a station change stay. Turning shaders off turns all of them off, except the night's lights, which then hold still, and greys out the weather setting.
+- **Model downloads** run through `shared/api/model-downloads.ts`, whose atom keeps each download's progress outside the components, so it carries on while the listener goes back to the radio. Settings' subtitles card downloads, cancels and deletes the speech models, and turns subtitles on once they arrive; the translation card does the same for the translator. Both use `ModelSection` and `useModelSettings` (`pages/settings`).
 
 ## UI components
 
-### Vendored shadcn
+### Primitives
 
-`shared/ui/shadcn/` is vendored shadcn, built on Base UI (never Radix).
+`shared/ui/shadcn/` holds the primitives, in shadcn's look and naming: buttons, cards, inputs, and those that need behaviour (tooltip, menu, slider, collapsible, toggle group) on [Kobalte](https://kobalte.dev/), toasts on `solid-sonner`.
 
-- **Read-only.** Never edit a file there; wrap it in a first-party component instead.
-- **Never refetch** a component or run `shadcn add --overwrite`: it reverts earlier local fixes.
-- **Delete** a component once nothing imports it.
-- Lint, format, coverage and knip skip it. Anything else knip reports as unused gets deleted.
+- They are written by hand: shadcn has no Solid components, so never run `shadcn add`. The `scroll-fade` utility is copied from shadcn's stylesheet into `app/styles/shadcn/`.
+- Each takes only what the app uses. Add a part, or a new primitive, when something needs it; knip deletes what nothing imports.
+- Kobalte marks state with `data-expanded`, `data-closed`, `data-pressed`, `data-disabled` and `data-orientation`.
 
-### First-party components
+### Other components
 
-Everything in `shared/ui/` outside `shadcn/`: flat, as PascalCase files with named exports.
+Everything in `shared/ui/` outside `shadcn/`: flat, as PascalCase files with named exports. Icons are Lucide's, drawn with `Icon` (`shared/ui/Icon.tsx`) from the `lucide` package: `<Icon icon={ArrowLeft} />`.
 
 ### Ink look
 
@@ -112,8 +123,8 @@ Everything in `shared/ui/` outside `shadcn/`: flat, as PascalCase files with nam
 
 ### Styling
 
-- Reach for shadcn variants and sizes (`size="xs"`, `size="sm"`, `variant="outline"`) before `className`.
-- `className` is for layout, not restyling.
+- Reach for shadcn variants and sizes (`size="xs"`, `size="sm"`, `variant="outline"`) before `class`.
+- `class` is for layout, not restyling.
 
 ### Surfaces
 

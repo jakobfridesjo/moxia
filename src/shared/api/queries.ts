@@ -1,4 +1,10 @@
-import { queryOptions } from "@tanstack/react-query";
+import {
+  queryOptions,
+  useQuery,
+  useQueryClient,
+  type QueryKey,
+  type UndefinedInitialDataOptions,
+} from "@tanstack/solid-query";
 import { commands } from "@/shared/api/commands.ts";
 
 /** Rust keeps the station list for a day, so asking again is cheap. */
@@ -42,3 +48,34 @@ export const localWeatherQuery = (latitude: number, longitude: number) => {
     retry: 1,
   });
 };
+
+/**
+ * A query whose `data` is the plain value in the cache, undefined until it is fetched. Solid Query's
+ * own `data` holds its reader back until the fetch lands and hands out a store; the radio shows
+ * at once, with what it has, and passes what it fetched on to the stores and to Rust as it is.
+ */
+export function useCommandQuery<T, K extends QueryKey>(
+  options: UndefinedInitialDataOptions<T, Error, T, K>
+) {
+  const queryClient = useQueryClient();
+  const query = useQuery(options);
+  return {
+    get data(): T | undefined {
+      // Read for the tracking: each fetch that lands moves it on.
+      void query.dataUpdatedAt;
+      return query.isSuccess ? queryClient.getQueryData<T>(options().queryKey) : undefined;
+    },
+    get isPending() {
+      return query.isPending;
+    },
+    get isFetching() {
+      return query.fetchStatus === "fetching";
+    },
+    get isError() {
+      return query.isError;
+    },
+    get error() {
+      return query.error;
+    },
+  };
+}

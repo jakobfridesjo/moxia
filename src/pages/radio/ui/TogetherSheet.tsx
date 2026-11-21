@@ -1,8 +1,9 @@
-import { useCallback, useId, useState } from "react";
-import { ScanQrCode, X } from "lucide-react";
+import { createSignal, createUniqueId, For, Show } from "solid-js";
+import { ScanQrCode, X } from "lucide";
 import { camera, canScan } from "@/shared/api/commands.ts";
 import { useMessages } from "@/shared/i18n/messages.ts";
-import { cn } from "@/shared/lib/class-names.ts";
+import { ariaBoolean } from "@/shared/lib/aria.ts";
+import { Icon } from "@/shared/ui/Icon.tsx";
 import { Button } from "@/shared/ui/shadcn/button.tsx";
 import { Input } from "@/shared/ui/shadcn/input.tsx";
 import type { RoomState } from "@/pages/radio/model/room-store.ts";
@@ -19,249 +20,257 @@ interface TogetherSheetProps {
   onClose: () => void;
 }
 
+const TABS = ["invite", "join"] as const;
+
 /** A hanging scroll over the painting: open a room and invite to it, or join one. */
-export function TogetherSheet({
-  room,
-  name,
-  onName,
-  onOpen,
-  onJoin,
-  onLeave,
-  onClose,
-}: TogetherSheetProps) {
+export function TogetherSheet(props: TogetherSheetProps) {
   const m = useMessages();
-  const t = m.together;
-  const [tab, setTab] = useState<"invite" | "join">("invite");
-  const [pasted, setPasted] = useState("");
-  const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
-  const ids = { title: useId(), name: useId(), invite: useId(), paste: useId() };
-  const busy = room.status === "opening" || room.status === "joining";
-  const named = name.trim().length > 0;
+  const [tab, setTab] = createSignal<(typeof TABS)[number]>("invite");
+  const [pasted, setPasted] = createSignal("");
+  const [scanning, setScanning] = createSignal(false);
+  const [scanError, setScanError] = createSignal<string | null>(null);
+  const ids = {
+    title: createUniqueId(),
+    name: createUniqueId(),
+    invite: createUniqueId(),
+    paste: createUniqueId(),
+  };
+  const busy = () => props.room.status === "opening" || props.room.status === "joining";
+  const named = () => props.name.trim().length > 0;
   // A scanned invite is joined at once when there is a name to join under; else it waits pasted.
   const scanInvite = async () => {
     setScanError(null);
     setScanning(true);
     try {
       const scanned = await camera.scanQrCode();
-      if (scanned === null) return setScanError(t.cameraRefused);
+      if (scanned === null) {
+        setScanError(m.together.cameraRefused);
+        return;
+      }
       setPasted(scanned);
-      if (named) onJoin(scanned);
+      if (named()) props.onJoin(scanned);
     } catch (error) {
-      if (error !== "cancelled") setScanError(t.scanFailed);
+      if (error !== "cancelled") setScanError(m.together.scanFailed);
     } finally {
       setScanning(false);
     }
   };
-  const cancelScan = useCallback(() => void camera.cancelScan().catch(() => undefined), []);
+  const cancelScan = () => void camera.cancelScan().catch(() => undefined);
 
   return (
     <section
       data-control
       role="dialog"
-      aria-modal
+      aria-modal="true"
       aria-labelledby={ids.title}
-      className="fixed inset-0 z-10 flex items-center justify-center bg-paper/80 px-[max(1.5rem,env(safe-area-inset-left))] py-[max(2rem,env(safe-area-inset-top))] text-ink select-text"
+      class="fixed inset-0 z-10 flex items-center justify-center bg-paper/80 px-[max(1.5rem,env(safe-area-inset-left))] py-[max(2rem,env(safe-area-inset-top))] text-ink select-text"
     >
-      <div className="flex max-h-full w-full max-w-md flex-col">
-        <div aria-hidden className="-mx-2.5 h-3 shrink-0 rounded-full bg-ink/85" />
-        <div className="relative flex min-h-0 flex-col gap-5 overflow-y-auto border-x border-ink/10 bg-paper px-6 pt-5 pb-6 shadow-lg">
+      <div class="flex max-h-full w-full max-w-md flex-col">
+        <div aria-hidden="true" class="-mx-2.5 h-3 shrink-0 rounded-full bg-ink/85" />
+        <div class="relative flex min-h-0 flex-col gap-5 overflow-y-auto border-x border-ink/10 bg-paper px-6 pt-5 pb-6 shadow-lg">
           <Button
             variant="ghost"
             size="icon-lg"
-            aria-label={t.close}
-            onClick={onClose}
-            className="absolute top-2 right-2"
+            aria-label={m.together.close}
+            onClick={() => props.onClose()}
+            class="absolute top-2 right-2"
           >
-            <X />
+            <Icon icon={X} />
           </Button>
-          <header className="flex items-baseline gap-3">
-            <h2 id={ids.title} lang="zh" className="font-brush text-4xl font-bold tracking-[0.2em]">
-              {t.heading}
+          <header class="flex items-baseline gap-3">
+            <h2 id={ids.title} lang="zh" class="font-brush text-4xl font-bold tracking-[0.2em]">
+              {m.together.heading}
             </h2>
-            <span className="text-ink-soft">{t.title}</span>
+            <span class="text-ink-soft">{m.together.title}</span>
           </header>
 
-          {room.status === "in" && room.invite ? (
-            <InRoom room={room} inviteId={ids.invite} onLeave={onLeave} />
-          ) : (
-            <>
-              <div className="grid gap-1.5">
-                <label htmlFor={ids.name} className="text-sm font-bold">
-                  {t.name}
-                </label>
-                <Input
-                  id={ids.name}
-                  value={name}
-                  maxLength={40}
-                  autoComplete="nickname"
-                  placeholder={t.namePlaceholder}
-                  disabled={busy}
-                  onChange={(event) => onName(event.target.value)}
-                  className="h-11 text-base"
-                />
-              </div>
-
-              <div role="tablist" className="flex gap-1 border-b border-ink/15">
-                {(["invite", "join"] as const).map((each) => (
-                  <button
-                    key={each}
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === each}
-                    disabled={busy}
-                    onClick={() => setTab(each)}
-                    className={cn(
-                      "-mb-px flex min-h-11 items-center gap-2 border-b-2 border-transparent px-3 outline-none focus-visible:ring-2 focus-visible:ring-ink",
-                      tab === each && "border-seal font-bold"
-                    )}
-                  >
-                    <span
-                      aria-hidden
-                      lang="zh"
-                      className={cn(
-                        "font-brush text-xl",
-                        tab === each ? "text-seal" : "text-ink-soft"
-                      )}
-                    >
-                      {t.glyphs[each]}
-                    </span>
-                    {t[each]}
-                  </button>
-                ))}
-              </div>
-
-              {tab === "invite" ? (
-                <div role="tabpanel" className="grid gap-3">
-                  <Button size="lg" disabled={!named || busy} onClick={onOpen} className="h-12">
-                    {room.status === "opening" ? t.opening : t.open}
-                  </Button>
-                </div>
-              ) : (
-                <form
-                  role="tabpanel"
-                  className="grid gap-3"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    if (named && pasted.trim()) onJoin(pasted);
-                  }}
-                >
-                  {canScan && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="lg"
-                      disabled={busy || scanning}
-                      onClick={() => void scanInvite()}
-                      className="h-12"
-                    >
-                      <ScanQrCode />
-                      {t.scan}
-                    </Button>
-                  )}
-                  {scanning && <ScanFrame onCancel={cancelScan} />}
-                  {scanError && (
-                    <p role="alert" className="text-sm text-seal">
-                      {scanError}
-                    </p>
-                  )}
-                  <label htmlFor={ids.paste} className="text-sm font-bold">
-                    {t.paste}
+          <Show
+            when={props.room.status === "in" && props.room.invite}
+            fallback={
+              <>
+                <div class="grid gap-1.5">
+                  <label for={ids.name} class="text-sm font-bold">
+                    {m.together.name}
                   </label>
                   <Input
-                    id={ids.paste}
-                    value={pasted}
-                    autoComplete="off"
-                    spellCheck={false}
-                    disabled={busy}
-                    onChange={(event) => setPasted(event.target.value)}
-                    className="h-11 font-mono text-sm"
+                    id={ids.name}
+                    value={props.name}
+                    maxlength={40}
+                    autocomplete="nickname"
+                    placeholder={m.together.namePlaceholder}
+                    disabled={busy()}
+                    onInput={(event) => props.onName(event.currentTarget.value)}
+                    class="h-11 text-base"
                   />
-                  <p className="text-sm text-ink-soft">{t.joinHelp}</p>
-                  <Button
-                    type="submit"
-                    size="lg"
-                    disabled={!named || !pasted.trim() || busy}
-                    className="h-12"
-                  >
-                    {room.status === "joining" ? t.joining : t.join}
-                  </Button>
-                </form>
-              )}
-              {room.error && (
-                <p role="alert" className="text-sm font-bold text-seal">
-                  {room.error}
-                </p>
-              )}
-            </>
-          )}
+                </div>
+
+                <div role="tablist" class="flex gap-1 border-b border-ink/15">
+                  <For each={TABS}>
+                    {(each) => (
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={ariaBoolean(tab() === each)}
+                        disabled={busy()}
+                        onClick={() => setTab(each)}
+                        class={[
+                          "-mb-px flex min-h-11 items-center gap-2 border-b-2 px-3 outline-none focus-visible:ring-2 focus-visible:ring-ink",
+                          tab() === each ? "border-seal font-bold" : "border-transparent",
+                        ]}
+                      >
+                        <span
+                          aria-hidden="true"
+                          lang="zh"
+                          class={[
+                            "font-brush text-xl",
+                            tab() === each ? "text-seal" : "text-ink-soft",
+                          ]}
+                        >
+                          {m.together.glyphs[each]}
+                        </span>
+                        {m.together[each]}
+                      </button>
+                    )}
+                  </For>
+                </div>
+
+                <Show
+                  when={tab() === "invite"}
+                  fallback={
+                    <form
+                      role="tabpanel"
+                      class="grid gap-3"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        if (named() && pasted().trim()) props.onJoin(pasted());
+                      }}
+                    >
+                      <Show when={canScan}>
+                        <Button
+                          variant="outline"
+                          size="lg"
+                          disabled={busy() || scanning()}
+                          onClick={() => void scanInvite()}
+                          class="h-12"
+                        >
+                          <Icon icon={ScanQrCode} />
+                          {m.together.scan}
+                        </Button>
+                      </Show>
+                      <Show when={scanning()}>
+                        <ScanFrame onCancel={cancelScan} />
+                      </Show>
+                      <Show when={scanError()}>
+                        <p role="alert" class="text-sm text-seal">
+                          {scanError()}
+                        </p>
+                      </Show>
+                      <label for={ids.paste} class="text-sm font-bold">
+                        {m.together.paste}
+                      </label>
+                      <Input
+                        id={ids.paste}
+                        value={pasted()}
+                        autocomplete="off"
+                        spellcheck="false"
+                        disabled={busy()}
+                        onInput={(event) => setPasted(event.currentTarget.value)}
+                        class="h-11 font-mono text-sm"
+                      />
+                      <p class="text-sm text-ink-soft">{m.together.joinHelp}</p>
+                      <Button
+                        type="submit"
+                        size="lg"
+                        disabled={!named() || !pasted().trim() || busy()}
+                        class="h-12"
+                      >
+                        {props.room.status === "joining" ? m.together.joining : m.together.join}
+                      </Button>
+                    </form>
+                  }
+                >
+                  <div role="tabpanel" class="grid gap-3">
+                    <Button
+                      size="lg"
+                      disabled={!named() || busy()}
+                      onClick={() => props.onOpen()}
+                      class="h-12"
+                    >
+                      {props.room.status === "opening" ? m.together.opening : m.together.open}
+                    </Button>
+                  </div>
+                </Show>
+                <Show when={props.room.error}>
+                  <p role="alert" class="text-sm font-bold text-seal">
+                    {props.room.error}
+                  </p>
+                </Show>
+              </>
+            }
+          >
+            <InRoom room={props.room} inviteId={ids.invite} onLeave={props.onLeave} />
+          </Show>
         </div>
-        <div aria-hidden className="-mx-2.5 h-3 shrink-0 rounded-full bg-ink/85" />
+        <div aria-hidden="true" class="-mx-2.5 h-3 shrink-0 rounded-full bg-ink/85" />
       </div>
     </section>
   );
 }
 
-function InRoom({
-  room,
-  inviteId,
-  onLeave,
-}: {
-  room: RoomState;
-  inviteId: string;
-  onLeave: () => void;
-}) {
-  const t = useMessages().together;
-  const [copied, setCopied] = useState<"copied" | "failed" | null>(null);
-  const invite = room.invite;
-  if (!invite) return null;
+function InRoom(props: { room: RoomState; inviteId: string; onLeave: () => void }) {
+  const m = useMessages();
+  const [copied, setCopied] = createSignal<"copied" | "failed" | null>(null);
 
-  const copy = async () => {
+  const copy = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(invite.text);
+      await navigator.clipboard.writeText(text);
       setCopied("copied");
     } catch {
       setCopied("failed");
-      document.getElementById(inviteId)?.focus();
+      document.getElementById(props.inviteId)?.focus();
     }
   };
 
   return (
-    <div className="flex flex-col items-center gap-4">
-      <div className="w-full max-w-56 border border-ink/15 p-2">
-        <InviteQr qr={invite.qr} label={t.qrLabel} />
-      </div>
-      <p className="text-center text-sm text-ink-soft">{t.inviteHelp}</p>
-      <div className="grid w-full gap-1.5">
-        <label htmlFor={inviteId} className="text-sm font-bold">
-          {t.inviteText}
-        </label>
-        <Input
-          id={inviteId}
-          readOnly
-          value={invite.text}
-          onFocus={(event) => event.target.select()}
-          className="h-11 font-mono text-xs"
-        />
-      </div>
-      <Button size="lg" onClick={() => void copy()} className="h-12 w-full">
-        {copied === "copied" ? t.copied : t.copy}
-      </Button>
-      {copied === "failed" && (
-        <p role="alert" className="text-sm text-seal">
-          {t.copyFailed}
-        </p>
+    <Show when={props.room.invite}>
+      {(invite) => (
+        <div class="flex flex-col items-center gap-4">
+          <div class="w-full max-w-56 border border-ink/15 p-2">
+            <InviteQr qr={invite().qr} label={m.together.qrLabel} />
+          </div>
+          <p class="text-center text-sm text-ink-soft">{m.together.inviteHelp}</p>
+          <div class="grid w-full gap-1.5">
+            <label for={props.inviteId} class="text-sm font-bold">
+              {m.together.inviteText}
+            </label>
+            <Input
+              id={props.inviteId}
+              readonly
+              value={invite().text}
+              onFocus={(event) => event.currentTarget.select()}
+              class="h-11 font-mono text-xs"
+            />
+          </div>
+          <Button size="lg" onClick={() => void copy(invite().text)} class="h-12 w-full">
+            {copied() === "copied" ? m.together.copied : m.together.copy}
+          </Button>
+          <Show when={copied() === "failed"}>
+            <p role="alert" class="text-sm text-seal">
+              {m.together.copyFailed}
+            </p>
+          </Show>
+          <p role="status" class="font-bold">
+            {props.room.count > 1 ? m.together.listening(props.room.count) : m.together.waiting}
+          </p>
+          <p class="text-center text-sm text-ink-soft">{m.together.anyoneCanJoin}</p>
+          <Button variant="outline" size="lg" onClick={() => props.onLeave()} class="h-12 w-full">
+            <span aria-hidden="true" lang="zh" class="font-brush text-lg text-seal">
+              {m.together.glyphs.leave}
+            </span>
+            {m.together.leave}
+          </Button>
+        </div>
       )}
-      <p role="status" className="font-bold">
-        {room.count > 1 ? t.listening(room.count) : t.waiting}
-      </p>
-      <p className="text-center text-sm text-ink-soft">{t.anyoneCanJoin}</p>
-      <Button variant="outline" size="lg" onClick={onLeave} className="h-12 w-full">
-        <span aria-hidden lang="zh" className="font-brush text-lg text-seal">
-          {t.glyphs.leave}
-        </span>
-        {t.leave}
-      </Button>
-    </div>
+    </Show>
   );
 }

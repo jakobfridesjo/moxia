@@ -54,7 +54,7 @@ it("measures the radio as it is used", { timeout: 180_000 }, async () => {
   const timers: ReturnType<typeof setInterval>[] = [];
   const every = (ms: number, act: () => void) => timers.push(setInterval(act, ms));
 
-  await renderRoute("/");
+  renderRoute("/");
   await expect.element(screen.getByRole("status")).toBeInTheDocument();
   // The first painting and its weather are made once; what is measured is what follows.
   await settle(3000);

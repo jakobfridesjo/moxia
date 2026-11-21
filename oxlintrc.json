@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "unicorn", "typescript", "oxc"],
+  "plugins": ["unicorn", "typescript", "oxc"],
   "categories": {
     "correctness": "error",
     "perf": "error"
@@ -38,28 +38,12 @@
         ]
       }
     ],
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": [
-      "error",
-      {
-        "allowConstantExport": true,
-        "customHOCs": ["bindComponent"]
-      }
-    ],
     "no-fallthrough": "error",
     "no-empty": "error",
     "no-prototype-builtins": "error",
     "no-case-declarations": "error",
     "typescript/no-array-constructor": "error",
     "typescript/no-deprecated": "error",
-    "react/no-unstable-nested-components": [
-      "error",
-      {
-        "propNamePattern": "{render*,cell,header,footer,tick}"
-      }
-    ],
-    "react/jsx-no-constructed-context-values": "error",
-    "react/no-array-index-key": "error",
     "typescript/no-explicit-any": "error",
     "typescript/no-misused-promises": "error",
     "typescript/no-unsafe-argument": "error",
@@ -97,20 +81,5 @@
     "typescript/require-await": "error",
     "typescript/restrict-plus-operands": "error"
   },
-  "ignorePatterns": [
-    "node_modules",
-    "dist",
-    "coverage",
-    "*.min.js",
-    "src/app/routeTree.gen.ts",
-    "src/shared/ui/shadcn/**"
-  ],
-  "overrides": [
-    {
-      "files": ["src/app/routes/**"],
-      "rules": {
-        "react/only-export-components": "off"
-      }
-    }
-  ]
+  "ignorePatterns": ["node_modules", "dist", "coverage", "*.min.js", "src/app/routeTree.gen.ts"]
 }

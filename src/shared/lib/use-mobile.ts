@@ -1,26 +1,15 @@
-import * as React from "react";
+import { createSignal, onCleanup, type Accessor } from "solid-js";
 
 const MOBILE_BREAKPOINT = 768;
 const MOBILE_MEDIA_QUERY = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`;
 
-function getIsMobile() {
-  if (typeof globalThis.matchMedia !== "function") {
-    return false;
-  }
-
-  return globalThis.matchMedia(MOBILE_MEDIA_QUERY).matches;
-}
-
-function subscribe(onChange: () => void) {
-  if (typeof globalThis.matchMedia !== "function") {
-    return () => {};
-  }
+export function useIsMobile(): Accessor<boolean> {
+  if (typeof globalThis.matchMedia !== "function") return () => false;
 
   const mediaQuery = globalThis.matchMedia(MOBILE_MEDIA_QUERY);
+  const [mobile, setMobile] = createSignal(mediaQuery.matches);
+  const onChange = () => setMobile(mediaQuery.matches);
   mediaQuery.addEventListener("change", onChange);
-  return () => mediaQuery.removeEventListener("change", onChange);
-}
-
-export function useIsMobile() {
-  return React.useSyncExternalStore(subscribe, getIsMobile);
+  onCleanup(() => mediaQuery.removeEventListener("change", onChange));
+  return mobile;
 }

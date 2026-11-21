@@ -7,7 +7,7 @@ const sonner = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("sonner", () => sonner);
+vi.mock("solid-sonner", () => sonner);
 
 const STICKY = { duration: Number.POSITIVE_INFINITY };
 

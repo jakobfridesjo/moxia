@@ -1,5 +1,4 @@
-import { useNavigate } from "@tanstack/react-router";
-import { useSelector } from "@tanstack/react-store";
+import { useNavigate } from "@tanstack/solid-router";
 import {
   environmentAtom,
   keySoundsAtom,
@@ -15,15 +14,25 @@ export function useSettingsManager() {
   const navigate = useNavigate();
   return {
     backToRadio: () => void navigate({ to: "/" }),
-    language: useSelector(languageAtom),
-    setLanguage: (language: Language) => languageAtom.set(language),
-    theme: useSelector(themeAtom),
-    setTheme: (theme: Theme) => themeAtom.set(theme),
-    keySounds: useSelector(keySoundsAtom),
+    get language() {
+      return languageAtom();
+    },
+    setLanguage: (next: Language) => languageAtom.set(next),
+    get theme() {
+      return themeAtom();
+    },
+    setTheme: (next: Theme) => themeAtom.set(next),
+    get keySounds() {
+      return keySoundsAtom();
+    },
     setKeySounds: (on: boolean) => keySoundsAtom.set(on),
-    environment: useSelector(environmentAtom),
+    get environment() {
+      return environmentAtom();
+    },
     setEnvironment: (on: boolean) => environmentAtom.set(on),
-    shaders: useSelector(shadersAtom),
+    get shaders() {
+      return shadersAtom();
+    },
     setShaders: (on: boolean) => shadersAtom.set(on),
   };
 }

@@ -5,14 +5,14 @@ import LicensesPage from "@/pages/about/ui/LicensesPage.tsx";
 
 describe("LicensesPage", () => {
   it("lists third-party licences with their notices", async () => {
-    await renderPageInRouter(<LicensesPage />);
+    await renderPageInRouter(() => <LicensesPage />);
 
-    await screen.getByRole("button", { name: /react-dom 19/ }).click();
+    await screen.getByRole("button", { name: /@kobalte\/core 2/ }).click();
     await expect.element(screen.getByText(/Permission is hereby granted/).first()).toBeVisible();
   });
 
   it("goes back to the about page", async () => {
-    const { router } = await renderPageInRouter(<LicensesPage />, {
+    const { router } = await renderPageInRouter(() => <LicensesPage />, {
       initialPath: "/about/licenses",
     });
 

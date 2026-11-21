@@ -1,4 +1,4 @@
-import { createAtom, type Atom } from "@tanstack/react-store";
+import { createAtom, type Atom } from "@/shared/lib/atom.ts";
 import * as z from "zod/mini";
 import { CATEGORIES, READINGS, SCRIPTS, type Reading, type Script } from "@/shared/api/commands.ts";
 import {
@@ -18,7 +18,7 @@ function storedAtom<T>(stored: PersistedValue<T>, fallback: () => T) {
   return Object.assign(atom, { reset: () => atom.set(fallback()) }) satisfies Atom<T>;
 }
 
-/** A preference kept in `localStorage`, readable outside React. */
+/** A preference kept in `localStorage`, readable outside the components. */
 function persistedAtom<T extends string>(key: string, values: readonly [T, ...T[]], fallback: T) {
   return storedAtom(persistedString<T>({ key, schema: z.enum(values), fallback }), () => fallback);
 }
@@ -32,7 +32,7 @@ export type Theme = (typeof THEMES)[number];
 
 export const themeAtom = persistedAtom<Theme>("theme", THEMES, "auto");
 
-/** A switch kept in `localStorage`, readable outside React. */
+/** A switch kept in `localStorage`, readable outside the components. */
 function persistedSwitch(key: string, fallback: boolean) {
   return storedAtom(persistedJson<boolean>({ key, schema: z.boolean(), fallback }), () => fallback);
 }

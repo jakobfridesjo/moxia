@@ -4,7 +4,16 @@ import { callsTo, mockCommands, sendToChannel } from "@/shared/test/tauri.ts";
 import { useMediaControls } from "@/pages/radio/model/use-media-controls.ts";
 
 function Radio(props: { playing: boolean; toggle: () => void; seek: (step: -1 | 1) => void }) {
-  useMediaControls({ title: "中国之声", artist: "新闻", playing: props.playing }, props);
+  useMediaControls(
+    {
+      title: "中国之声",
+      artist: "新闻",
+      get playing() {
+        return props.playing;
+      },
+    },
+    props
+  );
   return null;
 }
 
@@ -13,7 +22,7 @@ describe("useMediaControls", () => {
     const calls = mockCommands({ watch_media: () => null, show_media: () => null });
     const toggle = vi.fn();
     const seek = vi.fn();
-    await renderPage(<Radio playing toggle={toggle} seek={seek} />);
+    renderPage(() => <Radio playing toggle={toggle} seek={seek} />);
 
     await expect
       .poll(() => callsTo(calls, "show_media"))

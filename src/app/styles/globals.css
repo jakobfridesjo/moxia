@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import "./shadcn/scroll-fade.css";
 @import "@fontsource-variable/ibm-plex-sans";
 @import "lxgw-wenkai-webfont/lxgwwenkai-regular.css";
 @import "lxgw-wenkai-webfont/lxgwwenkai-bold.css";

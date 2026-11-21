@@ -1,4 +1,4 @@
-import { createAtom } from "@tanstack/react-store";
+import { createAtom } from "@/shared/lib/atom.ts";
 import {
   commandErrorMessage,
   commands,
@@ -40,7 +40,7 @@ export interface Caption {
 }
 
 /**
- * The subtitles of what plays, newest last, kept outside React like the levels: the painting
+ * The subtitles of what plays, newest last, kept outside the components like the levels: the painting
  * reads them every frame. A new play or a stop clears them.
  */
 export const captionsAtom = createAtom<Caption[]>([]);

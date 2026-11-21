@@ -1,13 +1,25 @@
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
-import { X } from "lucide-react";
+import type { JSX } from "@solidjs/web";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  createUniqueId,
+  For,
+  onSettled,
+  Show,
+} from "solid-js";
+import { X } from "lucide";
 import { useMessages } from "@/shared/i18n/messages.ts";
+import { ariaBoolean } from "@/shared/lib/aria.ts";
 import { formatClockTime } from "@/shared/lib/date.ts";
 import { formatMegabytes } from "@/shared/lib/number-format.ts";
+import { Icon } from "@/shared/ui/Icon.tsx";
 import { ModelDownloadFailure, ModelDownloadProgress } from "@/shared/ui/ModelDownloadProgress.tsx";
 import { Button } from "@/shared/ui/shadcn/button.tsx";
 import type { RoomLine, RoomState } from "@/pages/radio/model/room-store.ts";
 import {
   isTranslatable,
+  type MessageTranslation,
   type MissingTranslator,
   useMessageTranslation,
 } from "@/pages/radio/model/use-message-translation.ts";
@@ -21,25 +33,26 @@ interface RoomChatProps {
 }
 
 /** The whole conversation, over the lower part of the painting, with a line to write in. */
-export function RoomChat({ room, onSay, onLeave, onClose }: RoomChatProps) {
+export function RoomChat(props: RoomChatProps) {
   const m = useMessages();
-  const t = m.together;
-  const [draft, setDraft] = useState("");
-  const ids = { title: useId(), message: useId() };
-  const list = useRef<HTMLOListElement>(null);
-  const field = useRef<HTMLInputElement>(null);
-  const lastLine = room.lines.at(-1)?.id;
+  const [draft, setDraft] = createSignal("");
+  const ids = { title: createUniqueId(), message: createUniqueId() };
+  let list: HTMLOListElement | undefined;
+  let field: HTMLInputElement | undefined;
 
-  useEffect(() => field.current?.focus(), []);
-  useEffect(() => {
-    list.current?.lastElementChild?.scrollIntoView({ block: "end" });
-  }, [lastLine]);
+  onSettled(() => field?.focus());
+  createEffect(
+    createMemo(() => props.room.lines.at(-1)?.id),
+    () => {
+      list?.lastElementChild?.scrollIntoView({ block: "end" });
+    }
+  );
 
   const send = () => {
-    if (!draft.trim()) return;
-    onSay(draft);
+    if (!draft().trim()) return;
+    props.onSay(draft());
     setDraft("");
-    field.current?.focus();
+    field?.focus();
   };
 
   return (
@@ -47,63 +60,70 @@ export function RoomChat({ room, onSay, onLeave, onClose }: RoomChatProps) {
       data-control
       role="dialog"
       aria-labelledby={ids.title}
-      className="fixed inset-x-0 bottom-0 z-10 flex h-[65svh] flex-col text-ink select-text"
+      class="fixed inset-x-0 bottom-0 z-10 flex h-[65svh] flex-col text-ink select-text"
     >
-      <div aria-hidden className="h-14 shrink-0 bg-linear-to-b from-paper/0 to-paper/97" />
-      <div className="flex min-h-0 flex-1 flex-col bg-paper/97 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-        <header className="flex items-center gap-2 border-b border-ink/15 pr-2 pb-2 pl-5">
-          <h2 id={ids.title} className="flex-1 text-ink-soft">
-            {t.listening(room.count)}
+      <div aria-hidden="true" class="h-14 shrink-0 bg-linear-to-b from-paper/0 to-paper/97" />
+      <div class="flex min-h-0 flex-1 flex-col bg-paper/97 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+        <header class="flex items-center gap-2 border-b border-ink/15 pr-2 pb-2 pl-5">
+          <h2 id={ids.title} class="flex-1 text-ink-soft">
+            {m.together.listening(props.room.count)}
           </h2>
-          <Button variant="outline" onClick={onLeave} className="h-11 px-3">
-            <span aria-hidden lang="zh" className="font-brush text-lg text-seal">
-              {t.glyphs.leave}
+          <Button variant="outline" onClick={() => props.onLeave()} class="h-11 px-3">
+            <span aria-hidden="true" lang="zh" class="font-brush text-lg text-seal">
+              {m.together.glyphs.leave}
             </span>
-            {t.leave}
+            {m.together.leave}
           </Button>
-          <Button variant="ghost" size="icon-lg" aria-label={t.close} onClick={onClose}>
-            <X />
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            aria-label={m.together.close}
+            onClick={() => props.onClose()}
+          >
+            <Icon icon={X} />
           </Button>
         </header>
 
         <ol
-          ref={list}
-          aria-label={t.messages}
+          ref={(element) => (list = element)}
+          aria-label={m.together.messages}
           aria-live="polite"
-          className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-3.5"
+          class="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-3.5"
         >
-          {room.lines.length === 0 && (
-            <li className="text-center text-ink-soft">{t.nothingSaid}</li>
-          )}
-          {room.lines.map((line) => (
-            <li key={line.id}>
-              <Line line={line} />
-            </li>
-          ))}
+          <Show when={props.room.lines.length === 0}>
+            <li class="text-center text-ink-soft">{m.together.nothingSaid}</li>
+          </Show>
+          <For each={props.room.lines}>
+            {(line) => (
+              <li>
+                <Line line={line} />
+              </li>
+            )}
+          </For>
         </ol>
 
         <form
-          className="mx-3 flex items-center gap-2.5 border-y-2 border-ink/75 py-1.5 pr-1.5 pl-4"
+          class="mx-3 flex items-center gap-2.5 border-y-2 border-ink/75 py-1.5 pr-1.5 pl-4"
           onSubmit={(event) => {
             event.preventDefault();
             send();
           }}
         >
-          <label htmlFor={ids.message} className="sr-only">
-            {t.message}
+          <label for={ids.message} class="sr-only">
+            {m.together.message}
           </label>
           <input
-            ref={field}
+            ref={(element) => (field = element)}
             id={ids.message}
-            value={draft}
-            maxLength={500}
-            autoComplete="off"
-            placeholder={t.write}
-            onChange={(event) => setDraft(event.target.value)}
-            className="h-11 min-w-0 flex-1 bg-transparent font-brush text-xl outline-none placeholder:text-ink-soft"
+            value={draft()}
+            maxlength={500}
+            autocomplete="off"
+            placeholder={m.together.write}
+            onInput={(event) => setDraft(event.currentTarget.value)}
+            class="h-11 min-w-0 flex-1 bg-transparent font-brush text-xl outline-none placeholder:text-ink-soft"
           />
-          <Seal aria-label={t.send} pressed onClick={send}>
-            {t.glyphs.send}
+          <Seal aria-label={m.together.send} pressed onClick={send}>
+            {m.together.glyphs.send}
           </Seal>
         </form>
       </div>
@@ -111,31 +131,35 @@ export function RoomChat({ room, onSay, onLeave, onClose }: RoomChatProps) {
   );
 }
 
-function Line({ line }: { line: RoomLine }) {
-  const t = useMessages().together;
+/** A line never changes once it is in the room, so it is read once. */
+function Line(props: { line: RoomLine }) {
+  const m = useMessages();
+  const line = props.line;
   const at = formatClockTime(line.at);
-  if (line.kind === "said") return <SaidLine name={line.name ?? t.you} at={at} text={line.text} />;
-  const text =
+  if (line.kind === "said")
+    return <SaidLine name={line.name ?? m.together.you} at={at} text={line.text} />;
+  const text = () =>
     line.kind === "tuned"
       ? line.name === null
-        ? t.youTuned(line.station)
-        : t.tuned(line.name, line.station)
-      : t[line.kind](line.name);
+        ? m.together.youTuned(line.station)
+        : m.together.tuned(line.name, line.station)
+      : m.together[line.kind](line.name);
   return (
-    <p className="text-center text-sm text-ink-soft">
-      {text} · {at}
+    <p class="text-center text-sm text-ink-soft">
+      {text()} · {at}
     </p>
   );
 }
 
-function SaidLine({ name, at, text }: { name: string; at: string; text: string }) {
+function SaidLine(props: { name: string; at: string; text: string }) {
   const header = (
-    <div className="flex items-baseline gap-2 text-sm">
-      <strong>{name}</strong>
-      <span className="text-ink-soft">{at}</span>
+    <div class="flex items-baseline gap-2 text-sm">
+      <strong>{props.name}</strong>
+      <span class="text-ink-soft">{props.at}</span>
     </div>
   );
-  const said = <p className="font-brush text-lg leading-snug break-words">{text}</p>;
+  const said = <p class="font-brush text-lg leading-snug break-words">{props.text}</p>;
+  const text = props.text;
   if (!isTranslatable(text))
     return (
       <div>
@@ -146,82 +170,102 @@ function SaidLine({ name, at, text }: { name: string; at: string; text: string }
   return <TranslatableLine header={header} said={said} text={text} />;
 }
 
-function TranslatableLine({
-  header,
-  said,
-  text,
-}: {
-  header: ReactNode;
-  said: ReactNode;
-  text: string;
-}) {
-  const t = useMessages().together;
-  const translation = useMessageTranslation(text);
+function TranslatableLine(props: { header: JSX.Element; said: JSX.Element; text: string }) {
+  const m = useMessages();
+  const translation = useMessageTranslation(props.text);
   return (
     <div>
-      <div className="flex items-center gap-2">
-        <div className="flex-1">{header}</div>
+      <div class="flex items-center gap-2">
+        <div class="flex-1">{props.header}</div>
         <Button
           variant="ghost"
           size="sm"
-          aria-pressed={translation.shown}
+          aria-pressed={ariaBoolean(translation.shown)}
           onClick={translation.toggle}
-          className="-my-1 h-8 gap-1 px-2 text-ink-soft aria-pressed:text-ink"
+          class="-my-1 h-8 gap-1 px-2 text-ink-soft aria-pressed:text-ink"
         >
-          <span aria-hidden lang="zh" className="font-brush text-base text-seal">
-            {t.glyphs.translate}
+          <span aria-hidden="true" lang="zh" class="font-brush text-base text-seal">
+            {m.together.glyphs.translate}
           </span>
-          {t.translate}
+          {m.together.translate}
         </Button>
       </div>
-      {said}
-      {translation.shown && <Translation {...translation} />}
+      {props.said}
+      <Show when={translation.shown}>
+        <Translation of={translation} />
+      </Show>
     </div>
   );
 }
 
-function Translation({
-  translation,
-  loading,
-  error,
-  missing,
-}: ReturnType<typeof useMessageTranslation>) {
-  const t = useMessages().together;
-  if (missing) return <TranslatorDownload translator={missing} />;
-  if (loading) return <p className="mt-1 text-sm text-ink-soft">{t.translating}</p>;
-  if (error) return <p className="mt-1 text-sm text-ink-soft">{error}</p>;
-  return (
-    <p lang="en" className="mt-1 leading-snug break-words text-ink-soft">
-      {translation}
-    </p>
-  );
-}
-
-function TranslatorDownload({ translator }: { translator: MissingTranslator }) {
+function Translation(props: { of: MessageTranslation }) {
   const m = useMessages();
-  const { download } = translator;
-  if (download?.state === "downloading")
-    return (
-      <div className="mt-2 flex flex-col gap-2">
-        <p className="text-sm text-ink-soft">{m.together.translatorDownloading}</p>
-        <ModelDownloadProgress progress={download} label={m.translator.modelName} />
-        <Button variant="outline" size="sm" className="self-start" onClick={translator.onCancel}>
-          {m.common.cancel}
-        </Button>
-      </div>
-    );
   return (
-    <div className="mt-2 flex flex-col items-start gap-2">
-      {download?.state === "failed" ? (
-        <ModelDownloadFailure download={download} />
-      ) : (
-        <p className="text-sm text-ink-soft">
-          {m.together.translatorMissing(formatMegabytes(translator.bytes))}
-        </p>
+    <Show
+      when={props.of.missing}
+      fallback={
+        <Show
+          when={props.of.loading ? m.together.translating : props.of.error}
+          fallback={
+            <p lang="en" class="mt-1 leading-snug break-words text-ink-soft">
+              {props.of.translation}
+            </p>
+          }
+        >
+          {(note) => <p class="mt-1 text-sm text-ink-soft">{note()}</p>}
+        </Show>
+      }
+    >
+      {(missing) => <TranslatorDownload translator={missing()} />}
+    </Show>
+  );
+}
+
+function TranslatorDownload(props: { translator: MissingTranslator }) {
+  const m = useMessages();
+  const downloading = () => {
+    const download = props.translator.download;
+    return download?.state === "downloading" ? download : undefined;
+  };
+  const failed = () => {
+    const download = props.translator.download;
+    return download?.state === "failed" ? download : undefined;
+  };
+  return (
+    <Show
+      when={downloading()}
+      fallback={
+        <div class="mt-2 flex flex-col items-start gap-2">
+          <Show
+            when={failed()}
+            fallback={
+              <p class="text-sm text-ink-soft">
+                {m.together.translatorMissing(formatMegabytes(props.translator.bytes))}
+              </p>
+            }
+          >
+            {(download) => <ModelDownloadFailure download={download()} />}
+          </Show>
+          <Button variant="outline" size="sm" onClick={() => props.translator.onDownload()}>
+            {props.translator.download ? m.common.tryAgain : m.models.download}
+          </Button>
+        </div>
+      }
+    >
+      {(download) => (
+        <div class="mt-2 flex flex-col gap-2">
+          <p class="text-sm text-ink-soft">{m.together.translatorDownloading}</p>
+          <ModelDownloadProgress progress={download()} label={m.translator.modelName} />
+          <Button
+            variant="outline"
+            size="sm"
+            class="self-start"
+            onClick={() => props.translator.onCancel()}
+          >
+            {m.common.cancel}
+          </Button>
+        </div>
       )}
-      <Button variant="outline" size="sm" onClick={translator.onDownload}>
-        {download ? m.common.tryAgain : m.models.download}
-      </Button>
-    </div>
+    </Show>
   );
 }

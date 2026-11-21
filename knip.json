@@ -1,11 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": [
-    "src/shared/ui/shadcn/*.tsx",
-    "scripts/*.ts",
-    "src/**/*.perf.tsx",
-    "src/app/testing/perf-setup.ts"
-  ],
+  "entry": ["scripts/*.ts", "src/**/*.perf.tsx", "src/app/testing/perf-setup.ts"],
   "tanstack-router": {
     "entry": ["src/app/routeTree.gen.ts"]
   },

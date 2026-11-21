@@ -29,7 +29,7 @@ const room: RoomState = {
 };
 
 const renderChat = () =>
-  renderPage(<RoomChat room={room} onSay={() => {}} onLeave={() => {}} onClose={() => {}} />);
+  renderPage(() => <RoomChat room={room} onSay={() => {}} onLeave={() => {}} onClose={() => {}} />);
 
 describe("RoomChat", () => {
   it("translates a message into English when it is pressed", async () => {
@@ -37,7 +37,7 @@ describe("RoomChat", () => {
       list_models: () => [translator(true)],
       translate: () => "Today's news is interesting",
     });
-    await renderChat();
+    renderChat();
 
     const translate = screen.getByRole("button", { name: "Translate" });
     await translate.click();
@@ -63,7 +63,7 @@ describe("RoomChat", () => {
       },
       translate: () => "Today's news is interesting",
     });
-    await renderChat();
+    renderChat();
 
     await screen.getByRole("button", { name: "Translate" }).click();
     await expect

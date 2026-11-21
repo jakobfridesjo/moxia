@@ -1,6 +1,5 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { RouterProvider } from "@tanstack/react-router";
+import { render } from "@solidjs/web";
+import { RouterProvider } from "@tanstack/solid-router";
 import * as z from "zod/mini";
 import { createAppRouter } from "@/app/router.tsx";
 import { createQueryClient } from "@/shared/api/query-client.ts";
@@ -36,10 +35,4 @@ window.addEventListener("vite:preloadError", () => {
 const router = createAppRouter({ queryClient: createQueryClient() });
 
 const rootElement = document.getElementById("root");
-if (rootElement) {
-  createRoot(rootElement).render(
-    <StrictMode>
-      <RouterProvider router={router} />
-    </StrictMode>
-  );
-}
+if (rootElement) render(() => <RouterProvider router={router} />, rootElement);

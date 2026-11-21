@@ -1,8 +1,8 @@
-import { TanStackDevtools } from "@tanstack/react-devtools";
-import { useQueryClient } from "@tanstack/react-query";
-import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
-import { useRouter } from "@tanstack/react-router";
-import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { TanStackDevtools } from "@tanstack/solid-devtools";
+import { useQueryClient } from "@tanstack/solid-query";
+import { SolidQueryDevtoolsPanel } from "@tanstack/solid-query-devtools";
+import { useRouter } from "@tanstack/solid-router";
+import { TanStackRouterDevtoolsPanel } from "@tanstack/solid-router-devtools";
 
 export function AppDevtools() {
   const router = useRouter();
@@ -12,8 +12,14 @@ export function AppDevtools() {
     <TanStackDevtools
       config={{ hideInAutomation: true }}
       plugins={[
-        { name: "TanStack Query", render: <ReactQueryDevtoolsPanel client={queryClient} /> },
-        { name: "TanStack Router", render: <TanStackRouterDevtoolsPanel router={router} /> },
+        {
+          name: "TanStack Query",
+          render: () => <SolidQueryDevtoolsPanel client={queryClient} />,
+        },
+        {
+          name: "TanStack Router",
+          render: () => <TanStackRouterDevtoolsPanel router={router} />,
+        },
       ]}
     />
   );

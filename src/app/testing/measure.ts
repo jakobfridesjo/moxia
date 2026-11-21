@@ -1,5 +1,4 @@
 import { cdp, server } from "vitest/browser";
-import { renderCounts, resetRenders } from "@/app/testing/react-renders.ts";
 
 interface ProfileNode {
   id: number;
@@ -90,7 +89,6 @@ export interface Measurement {
   /** Share of wall time the main thread was busy, and on what. */
   busy: { total: number; script: number; layout: number; style: number };
   longTasks: { count: number; ms: number };
-  react: ReturnType<typeof renderCounts>;
   hot: [string, number][];
 }
 
@@ -105,7 +103,6 @@ export async function measure(scenario: string, seconds: number): Promise<Measur
     list.getEntries().forEach((entry) => longTasks.push(entry.duration))
   );
   observer.observe({ type: "longtask" });
-  resetRenders();
   const before = await metrics();
   await session.send("Profiler.start");
 
@@ -139,7 +136,6 @@ export async function measure(scenario: string, seconds: number): Promise<Measur
       style: share("RecalcStyleDuration"),
     },
     longTasks: { count: longTasks.length, ms: longTasks.reduce((sum, ms) => sum + ms, 0) },
-    react: renderCounts(),
     hot: hotFunctions(profile, 12),
   };
 }
@@ -154,12 +150,6 @@ function report(measurements: Measurement[]) {
       `── ${m.scenario} (${m.seconds} s)`,
       `   frames  ${m.frames.fps.toFixed(1)} fps · p50 ${ms(m.frames.p50)} · p95 ${ms(m.frames.p95)} · max ${ms(m.frames.max)} · ${m.frames.over33ms} over 33 ms`,
       `   busy    ${pct(m.busy.total)} (script ${pct(m.busy.script)}, layout ${pct(m.busy.layout)}, style ${pct(m.busy.style)}) · long tasks ${m.longTasks.count} (${ms(m.longTasks.ms)})`,
-      `   react   ${m.react.commits} commits · ${
-        m.react.components
-          .slice(0, 8)
-          .map(([name, count]) => `${name}×${count}`)
-          .join(", ") || "nothing rendered"
-      }`,
       `   hot     ${m.hot
         .slice(0, 8)
         .map(([name, time]) => `${name} ${time.toFixed(0)}ms`)

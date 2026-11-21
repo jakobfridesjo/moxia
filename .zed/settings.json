@@ -27,22 +27,6 @@
           "fmt.configPath": ".oxfmtrc.json"
         }
       }
-    },
-    "tailwindcss-language-server": {
-      "settings": {
-        "files": {
-          "exclude": [
-            "**/.git/**",
-            "**/node_modules/**",
-            "**/.hg/**",
-            "**/.svn/**",
-            "src/components/ui/*.js",
-            "src/components/ui/*.jsx",
-            "src/components/ui/*.ts",
-            "src/components/ui/*.tsx"
-          ]
-        }
-      }
     }
   },
   "languages": {

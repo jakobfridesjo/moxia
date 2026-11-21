@@ -1,5 +1,5 @@
-import type { QueryClient } from "@tanstack/react-query";
-import { createAtom } from "@tanstack/react-store";
+import type { QueryClient } from "@tanstack/solid-query";
+import { createAtom } from "@/shared/lib/atom.ts";
 import {
   commandErrorMessage,
   commands,
@@ -15,7 +15,7 @@ export type ModelDownload =
 
 /**
  * Each model's running download, or the one an error stopped; absent once it finishes or is
- * cancelled. Kept outside React, so a download carries on while the person goes back to the radio.
+ * cancelled. Kept outside the components, so a download carries on while the person goes back to the radio.
  */
 export const modelDownloadsAtom = createAtom<Partial<Record<Model, ModelDownload>>>({});
 

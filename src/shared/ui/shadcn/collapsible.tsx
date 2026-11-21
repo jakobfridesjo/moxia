@@ -1,21 +1,28 @@
-"use client"
+import type { ValidComponent } from "@solidjs/web";
+import type { PolymorphicProps } from "@kobalte/core/polymorphic";
+import {
+  Collapsible as CollapsiblePrimitive,
+  type CollapsibleContentProps,
+  type CollapsibleRootProps,
+  type CollapsibleTriggerProps,
+} from "@kobalte/core/collapsible";
 
-import { Collapsible as CollapsiblePrimitive } from "@base-ui/react/collapsible"
-
-function Collapsible({ ...props }: CollapsiblePrimitive.Root.Props) {
-  return <CollapsiblePrimitive.Root data-slot="collapsible" {...props} />
+function Collapsible<T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, CollapsibleRootProps<T>>
+) {
+  return <CollapsiblePrimitive data-slot="collapsible" {...props} />;
 }
 
-function CollapsibleTrigger({ ...props }: CollapsiblePrimitive.Trigger.Props) {
-  return (
-    <CollapsiblePrimitive.Trigger data-slot="collapsible-trigger" {...props} />
-  )
+function CollapsibleTrigger<T extends ValidComponent = "button">(
+  props: PolymorphicProps<T, CollapsibleTriggerProps<T>>
+) {
+  return <CollapsiblePrimitive.Trigger data-slot="collapsible-trigger" {...props} />;
 }
 
-function CollapsibleContent({ ...props }: CollapsiblePrimitive.Panel.Props) {
-  return (
-    <CollapsiblePrimitive.Panel data-slot="collapsible-content" {...props} />
-  )
+function CollapsibleContent<T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, CollapsibleContentProps<T>>
+) {
+  return <CollapsiblePrimitive.Content data-slot="collapsible-content" {...props} />;
 }
 
-export { Collapsible, CollapsibleTrigger, CollapsibleContent }
+export { Collapsible, CollapsibleTrigger, CollapsibleContent };

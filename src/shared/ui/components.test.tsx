@@ -8,21 +8,21 @@ afterEach(async () => {
 });
 describe("PageHeader", () => {
   it("shows the title and actions side by side on desktop", async () => {
-    await renderPage(
+    renderPage(() => (
       <PageHeader title="Library">
         <button type="button">Import book</button>
       </PageHeader>
-    );
+    ));
     await expect.element(screen.getByText("Library")).toBeVisible();
     await expect.element(screen.getByRole("button", { name: "Import book" })).toBeVisible();
   });
   it("hides the actions behind a menu on mobile", async () => {
     await page.viewport(375, 800);
-    await renderPage(
+    renderPage(() => (
       <PageHeader title="Library">
         <button type="button">Import book</button>
       </PageHeader>
-    );
+    ));
     await expect
       .element(screen.getByRole("button", { name: "Import book" }))
       .not.toBeInTheDocument();
@@ -32,15 +32,15 @@ describe("PageHeader", () => {
   });
   it("moves actions that do not fit beside the title into the menu", async () => {
     await page.viewport(800, 800);
-    await renderPage(
-      <div className="w-full">
+    renderPage(() => (
+      <div class="w-full">
         <PageHeader title="Library">
-          <button type="button" style={{ width: 900 }}>
+          <button type="button" style={{ width: "900px" }}>
             Import book
           </button>
         </PageHeader>
       </div>
-    );
+    ));
     await expect.element(screen.getByRole("button", { name: "Actions" })).toBeVisible();
     await expect
       .element(screen.getByRole("button", { name: "Import book" }))
@@ -52,24 +52,24 @@ describe("PageHeader", () => {
   });
   it("leaves out the mobile menu when the page has no actions", async () => {
     await page.viewport(375, 800);
-    await renderPage(<PageHeader title="Library" />);
+    renderPage(() => <PageHeader title="Library" />);
     await expect.element(screen.getByRole("button", { name: "Actions" })).not.toBeInTheDocument();
   });
 });
 describe("TooltipIconButton", () => {
   it("labels the button for assistive tech", async () => {
     const onClick = vi.fn();
-    await renderPage(
+    renderPage(() => (
       <TooltipIconButton label="Delete book" onClick={onClick}>
         <span aria-hidden="true">x</span>
       </TooltipIconButton>
-    );
+    ));
     const button = screen.getByRole("button", { name: "Delete book" });
     await userEvent.click(button);
     expect(onClick).toHaveBeenCalled();
   });
   it("shows each button's own tooltip on hover", async () => {
-    await renderPage(
+    renderPage(() => (
       <>
         <TooltipIconButton label="Delete" tooltip="Delete book">
           <span aria-hidden="true">x</span>
@@ -78,7 +78,7 @@ describe("TooltipIconButton", () => {
           <span aria-hidden="true">c</span>
         </TooltipIconButton>
       </>
-    );
+    ));
     await userEvent.hover(screen.getByRole("button", { name: "Copy" }));
     await expect.element(screen.getByText("Copy word")).toBeVisible();
     await expect.element(screen.getByText("Delete book")).not.toBeInTheDocument();

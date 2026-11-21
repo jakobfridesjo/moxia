@@ -79,7 +79,7 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
 }
 
-declare module '@tanstack/react-router' {
+declare module '@tanstack/solid-router' {
   interface FileRoutesByPath {
     '/': {
       id: '/'

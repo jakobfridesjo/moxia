@@ -1,11 +1,11 @@
 # AGENTS.md
 
-墨虾 Moxia: a Tauri 2 app (React in `src/`, Rust in `src-tauri/`) that plays Chinese-language radio stations from radio-browser. See [README.md](README.md).
+墨虾 Moxia: a Tauri 2 app (Solid 2 in `src/`, Rust in `src-tauri/`) that plays Chinese-language radio stations from radio-browser. See [README.md](README.md).
 
 - Run everything as mise tasks from the repo root; verify with `mise check` and `mise test`
 - On a Fedora Atomic Desktop host, all Rust builds only inside the `fedora-toolbox-45` toolbox
 - Logic lives in `src-tauri/radio-core/`; the frontend reaches Rust only through `src/shared/api/commands.ts`, whose types mirror the serde types by hand
-- Never hard-code user-facing strings; never edit `src/shared/ui/shadcn/` or `routeTree.gen.ts`
+- Never hard-code user-facing strings; never edit `routeTree.gen.ts`
 - Clear code beats comments
 - Edit only `AGENTS.md`; `CLAUDE.md` is a symlink to it. Documentation lives in `docs/`; keep it in sync when the code it describes changes
 

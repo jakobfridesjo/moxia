@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useCommandQuery } from "@/shared/api/queries.ts";
 import { z } from "zod/mini";
 
 const noticesSchema = z.array(
@@ -18,9 +18,9 @@ async function loadNotices(): Promise<LicenseNotice[]> {
 }
 
 export function useThirdPartyLicenses() {
-  return useQuery({
+  return useCommandQuery(() => ({
     queryKey: ["third-party-licenses"],
     queryFn: loadNotices,
     staleTime: Infinity,
-  });
+  }));
 }

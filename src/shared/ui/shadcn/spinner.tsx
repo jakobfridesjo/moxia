@@ -1,10 +1,18 @@
-import { cn } from "@/shared/lib/class-names.ts"
-import { Loader2Icon } from "lucide-react"
+import { LoaderCircle } from "lucide";
+import { cn } from "@/shared/lib/class-names.ts";
+import { Icon } from "@/shared/ui/Icon.tsx";
 
-function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
+/** A turning circle; `decorative` when text beside it already says what is loading. */
+function Spinner(props: { class?: string; decorative?: boolean }) {
   return (
-    <Loader2Icon data-slot="spinner" role="status" aria-label="Loading" className={cn("size-4 animate-spin", className)} {...props} />
-  )
+    <Icon
+      icon={LoaderCircle}
+      data-slot="spinner"
+      role={props.decorative ? undefined : "status"}
+      label={props.decorative ? undefined : "Loading"}
+      class={cn("size-4 animate-spin", props.class)}
+    />
+  );
 }
 
-export { Spinner }
+export { Spinner };

@@ -17,7 +17,7 @@ const status = (downloaded: boolean): ModelStatus => ({
 describe("SubtitlesCard", () => {
   it("keeps subtitles off until the speech models are downloaded", async () => {
     mockCommands({ list_models: () => [status(false)] });
-    await renderPage(<SubtitlesCard />);
+    renderPage(() => <SubtitlesCard />);
 
     await expect
       .element(screen.getByText("Download the speech models to turn subtitles on."))
@@ -42,7 +42,7 @@ describe("SubtitlesCard", () => {
       },
       set_subtitles: () => null,
     });
-    await renderPage(<SubtitlesCard />);
+    renderPage(() => <SubtitlesCard />);
 
     await screen.getByRole("button", { name: "Download" }).click();
     const bar = screen.getByRole("progressbar", { name: "Speech models" });
@@ -66,7 +66,7 @@ describe("SubtitlesCard", () => {
       list_models: () => [status(true)],
       set_subtitles: () => null,
     });
-    await renderPage(<SubtitlesCard />);
+    renderPage(() => <SubtitlesCard />);
 
     const hongKong = screen
       .getByRole("group", { name: "Characters" })
@@ -87,7 +87,7 @@ describe("SubtitlesCard", () => {
       list_models: () => [status(true)],
       set_subtitles: () => null,
     });
-    await renderPage(<SubtitlesCard />);
+    renderPage(() => <SubtitlesCard />);
 
     const zhuyin = screen
       .getByRole("group", { name: "Readings" })
@@ -109,7 +109,7 @@ describe("SubtitlesCard", () => {
         throw new Error("Connection reset");
       },
     });
-    await renderPage(<SubtitlesCard />);
+    renderPage(() => <SubtitlesCard />);
 
     await screen.getByRole("button", { name: "Download" }).click();
 
@@ -130,7 +130,7 @@ describe("SubtitlesCard", () => {
         return null;
       },
     });
-    await renderPage(<SubtitlesCard />);
+    renderPage(() => <SubtitlesCard />);
 
     await screen.getByRole("button", { name: "Delete", exact: true }).click();
     await screen.getByRole("button", { name: "Delete 268 MB" }).click();

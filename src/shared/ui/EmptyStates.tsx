@@ -1,12 +1,8 @@
-import type { ReactNode } from "react";
+import type { JSX } from "@solidjs/web";
 import { cn } from "@/shared/lib/class-names.ts";
 
-export function CenteredEmpty({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return <div className={cn("flex flex-1 items-center justify-center", className)}>{children}</div>;
+export function CenteredEmpty(props: { children: JSX.Element; class?: string }) {
+  return (
+    <div class={cn("flex flex-1 items-center justify-center", props.class)}>{props.children}</div>
+  );
 }

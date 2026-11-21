@@ -1,4 +1,4 @@
-import { createAtom } from "@tanstack/react-store";
+import { createAtom } from "@/shared/lib/atom.ts";
 import {
   commandErrorMessage,
   commands,

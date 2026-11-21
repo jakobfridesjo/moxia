@@ -4,7 +4,7 @@
 
 | Path                         | What it is                                                      |
 | ---------------------------- | --------------------------------------------------------------- |
-| `src/`                       | React frontend (Vite), the top-level project                    |
+| `src/`                       | Solid frontend (Vite), the top-level project                    |
 | `src-tauri/radio-core/`      | All logic, with no Tauri dependency                             |
 | `src-tauri/src/commands.rs`  | Tauri commands: a thin layer over `radio-core`                  |
 | `src-tauri/src/media.rs`     | The system's media controls (souvlaki; Android's media session) |

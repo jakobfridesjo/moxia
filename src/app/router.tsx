@@ -1,4 +1,4 @@
-import { createRouter, type RouterHistory } from "@tanstack/react-router";
+import { createRouter, type RouterHistory } from "@tanstack/solid-router";
 import { routeTree } from "@/app/routeTree.gen.ts";
 import type { AppRouterContext } from "@/app/router-context.ts";
 import { NotFoundFallback, RouteErrorFallback } from "@/app/layouts/RouteFallbacks.tsx";
@@ -18,7 +18,7 @@ export function createAppRouter(context: AppRouterContext, history?: RouterHisto
   });
 }
 
-declare module "@tanstack/react-router" {
+declare module "@tanstack/solid-router" {
   interface Register {
     router: ReturnType<typeof createAppRouter>;
   }

@@ -34,7 +34,7 @@ const hold = (button: Element) =>
 describe("subtitles", () => {
   it("sends the listener to settings for the speech models before they are downloaded", async () => {
     radioCommands();
-    const { router } = await renderRoute("/");
+    const { router } = renderRoute("/");
 
     await screen.getByRole("button", { name: "Turn subtitles on" }).click();
 
@@ -46,7 +46,7 @@ describe("subtitles", () => {
       list_models: () => [{ model: "subtitles", bytes: 268_000_000, downloaded: true }],
       set_subtitles: () => null,
     });
-    await renderRoute("/");
+    renderRoute("/");
 
     await screen.getByRole("button", { name: "Turn subtitles on" }).click();
     await expect
@@ -91,7 +91,7 @@ describe("subtitles", () => {
 describe("the radio", () => {
   it("opens on the painting, named after the first station on the dial", async () => {
     radioCommands();
-    const { router } = await renderRoute("/");
+    const { router } = renderRoute("/");
 
     await expect.element(screen.getByRole("main", { name: "Moxia radio" })).toBeVisible();
     await expect.poll(() => inscription().element().textContent).toContain("中国之声");
@@ -100,7 +100,7 @@ describe("the radio", () => {
 
   it("plays and stops with the space bar, and steps through the stations with the arrows", async () => {
     const calls = radioCommands();
-    await renderRoute("/");
+    renderRoute("/");
     await expect.poll(() => inscription().element().textContent).toContain("中国之声");
 
     await userEvent.keyboard(" ");
@@ -120,7 +120,7 @@ describe("the radio", () => {
 
   it("plays a preset from its seal", async () => {
     const calls = radioCommands({ list_presets: () => [{ key: 2, station: hongKong }] });
-    await renderRoute("/");
+    renderRoute("/");
 
     await screen.getByRole("button", { name: "Preset 2: 香港电台" }).click();
     await expect
@@ -134,7 +134,7 @@ describe("the radio", () => {
       start_recording: () => null,
       stop_recording: () => tape,
     });
-    await renderRoute("/");
+    renderRoute("/");
     await userEvent.keyboard(" ");
     await expect.poll(() => callsTo(calls, "play").length).toBe(1);
     sendToChannel(callsTo(calls, "play")[0].onEvent, { kind: "playing" });
@@ -151,7 +151,7 @@ describe("the radio", () => {
   it("plays a recording on the mountain path, and the radio again once the path is left", async () => {
     const tape = makeTape({ id: "t1", station: hongKong, recordedAt: "2026-11-08T07:30:00Z" });
     const calls = radioCommands({ list_tapes: () => [tape], play_tape: () => 0 });
-    await renderRoute("/");
+    renderRoute("/");
 
     await screen.getByRole("button", { name: "Recordings" }).click();
     await screen.getByRole("button", { name: /^Play 香港电台, recorded/ }).click();
@@ -170,7 +170,7 @@ describe("the radio", () => {
   it("opens the mountain path on its own screen and leaves it", async () => {
     const tapes = ["a", "b", "c"].map((id) => makeTape({ id, station: hongKong }));
     radioCommands({ list_tapes: () => tapes });
-    await renderRoute("/");
+    renderRoute("/");
 
     await screen.getByRole("button", { name: "Recordings" }).click();
     const path = screen.getByRole("dialog", { name: "Recordings along a mountain path" });
@@ -191,7 +191,7 @@ describe("the radio", () => {
       themeAtom.set("day");
       const tape = makeTape({ id: "t1", station: hongKong });
       const calls = radioCommands({ list_tapes: () => [tape], delete_tape: () => null });
-      await renderRoute("/");
+      renderRoute("/");
 
       await screen.getByRole("button", { name: "Recordings" }).click();
       hold(screen.getByRole("button", { name: /^Play 香港电台/ }).element());
@@ -208,7 +208,7 @@ describe("the radio", () => {
   it("deletes a held recording even when the scroll is rolled up before the cane lands", async () => {
     const tape = makeTape({ id: "t1", station: hongKong });
     const calls = radioCommands({ list_tapes: () => [tape], delete_tape: () => null });
-    await renderRoute("/");
+    renderRoute("/");
 
     await screen.getByRole("button", { name: "Recordings" }).click();
     hold(screen.getByRole("button", { name: /^Play 香港电台/ }).element());
@@ -225,7 +225,7 @@ describe("the radio", () => {
       themeAtom.set("day");
       const tape = makeTape({ id: "t1", station: hongKong });
       const calls = radioCommands({ list_tapes: () => [tape], delete_tape: () => null });
-      await renderRoute("/");
+      renderRoute("/");
 
       await screen.getByRole("button", { name: "Recordings" }).click();
       hold(screen.getByRole("button", { name: /^Play 香港电台/ }).element());
@@ -247,7 +247,7 @@ describe("the radio", () => {
       themeAtom.set("night");
       const tape = makeTape({ id: "t1", station: hongKong });
       const calls = radioCommands({ list_tapes: () => [tape], delete_tape: () => null });
-      await renderRoute("/");
+      renderRoute("/");
 
       await screen.getByRole("button", { name: "Recordings" }).click();
       hold(screen.getByRole("button", { name: /^Play 香港电台/ }).element());
@@ -267,7 +267,7 @@ describe("the radio", () => {
       makeTape({ id: `t${k}`, station: hongKong })
     );
     const calls = radioCommands({ list_tapes: () => tapes, play_tape: () => 0 });
-    await renderRoute("/");
+    renderRoute("/");
 
     await screen.getByRole("button", { name: "Recordings" }).click();
     const slip = screen.getByRole("button", { name: /^Play 香港电台/ }).first();
@@ -296,7 +296,7 @@ describe("the radio", () => {
       makeTape({ id: `t${k}`, station: hongKong })
     );
     radioCommands({ list_tapes: () => tapes });
-    await renderRoute("/");
+    renderRoute("/");
 
     await screen.getByRole("button", { name: "Recordings" }).click();
     const slip = screen
@@ -312,7 +312,7 @@ describe("the radio", () => {
 
   it("opens the settings from its seal and comes back", async () => {
     radioCommands();
-    const { router } = await renderRoute("/");
+    const { router } = renderRoute("/");
 
     await screen.getByRole("button", { name: "Settings" }).click();
     await expect.poll(() => router.state.location.pathname).toBe("/settings");
@@ -323,7 +323,7 @@ describe("the radio", () => {
   it("shows the not-found page for an unknown path", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     mockCommands({});
-    await renderRoute("/does-not-exist");
+    renderRoute("/does-not-exist");
     await expect.element(screen.getByText("Page not found")).toBeVisible();
   });
 });
@@ -343,7 +343,7 @@ describe("listening together", () => {
       tune_room: () => null,
       leave_room: () => null,
     });
-    await renderRoute("/");
+    renderRoute("/");
 
     await screen.getByRole("button", { name: "Listen together" }).click();
     await screen.getByRole("textbox", { name: "Your name" }).fill("Lin");
@@ -382,7 +382,7 @@ describe("listening together", () => {
       say_to_room: () => null,
       leave_room: () => null,
     });
-    await renderRoute("/");
+    renderRoute("/");
 
     await screen.getByRole("button", { name: "Listen together" }).click();
     await screen.getByRole("textbox", { name: "Your name" }).fill("Mei");
@@ -420,7 +420,7 @@ describe("listening together", () => {
         throw new Error("No one answered the invite. Ask for a new one if they have left.");
       },
     });
-    await renderRoute("/");
+    renderRoute("/");
 
     await screen.getByRole("button", { name: "Listen together" }).click();
     await screen.getByRole("textbox", { name: "Your name" }).fill("Mei");

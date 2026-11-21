@@ -1,3 +1,4 @@
+import { createMemo, Show } from "solid-js";
 import type { Station } from "@/shared/api/commands.ts";
 import { useMessages } from "@/shared/i18n/messages.ts";
 import { stationClock } from "@/shared/lib/station-time.ts";
@@ -20,46 +21,48 @@ import { SealMark } from "@/pages/radio/ui/Seal.tsx";
  * stand in the same place for every station, the name at one size; a long name runs on into columns of
  * even length to its left.
  */
-export function Inscription({
-  title,
-  station,
-  recordedAt,
-}: {
+export function Inscription(props: {
   title: string;
   station: Station | null;
   /** When the recording being played was made; null when live. */
   recordedAt: string | null;
 }) {
-  const { inscription } = useMessages().radio;
-  const simplified = !station || station.countryCode === "CN";
-  const script = simplified ? inscription.simplified : inscription.traditional;
-  const recorded = recordedAt ? new Date(recordedAt) : null;
-  const recordedDate = recorded && lunarDate(recorded, simplified ? "zh-Hans" : "zh-Hant");
-  const recording =
-    recorded && recordedDate
+  const m = useMessages();
+  const simplified = () => !props.station || props.station.countryCode === "CN";
+  const recording = createMemo(() => {
+    const { inscription } = m.radio;
+    const script = simplified() ? inscription.simplified : inscription.traditional;
+    const recorded = props.recordedAt ? new Date(props.recordedAt) : null;
+    const recordedDate = recorded && lunarDate(recorded, simplified() ? "zh-Hans" : "zh-Hant");
+    return recorded && recordedDate
       ? recordedDate + script.times[timeOfDay(stationClock(recorded).hour)] + script.recorded
       : null;
+  });
 
   return (
     <>
       <MistFilter />
       <div
-        aria-hidden
-        lang={simplified ? "zh-Hans" : "zh-Hant"}
-        className="pointer-events-none absolute top-[max(1.4rem,env(safe-area-inset-top))] right-[max(1.6rem,env(safe-area-inset-right))] -mt-12 -mr-12 flex flex-row-reverse items-start gap-2.5 p-12 font-brush text-ink [filter:url(#inscription-mist)] dark:[filter:none]"
+        aria-hidden="true"
+        lang={simplified() ? "zh-Hans" : "zh-Hant"}
+        class="pointer-events-none absolute top-[max(1.4rem,env(safe-area-inset-top))] right-[max(1.6rem,env(safe-area-inset-right))] -mt-12 -mr-12 flex flex-row-reverse items-start gap-2.5 p-12 font-brush text-ink [filter:url(#inscription-mist)] dark:[filter:none]"
       >
-        <div className="flex flex-col items-end gap-2" style={{ fontSize: `${TITLE_REM}rem` }}>
-          <div className="flex w-[1.15em] justify-center">
-            <SealMark glyph={inscription.regions[station?.countryCode ?? "CN"]} carved size={38} />
+        <div class="flex flex-col items-end gap-2" style={{ "font-size": `${TITLE_REM}rem` }}>
+          <div class="flex w-[1.15em] justify-center">
+            <SealMark
+              glyph={m.radio.inscription.regions[props.station?.countryCode ?? "CN"]}
+              carved
+              size={38}
+            />
           </div>
           <p
-            className="m-0 leading-[1.15] font-bold tracking-[0.04em] [text-wrap:balance] [writing-mode:vertical-rl]"
-            style={{ maxHeight: `${TITLE_COLUMN_SVH}svh` }}
+            class="m-0 leading-[1.15] font-bold tracking-[0.04em] [text-wrap:balance] [writing-mode:vertical-rl]"
+            style={{ "max-height": `${TITLE_COLUMN_SVH}svh` }}
           >
-            <Inscribed text={title} />
+            {inscribed(props.title)}
           </p>
         </div>
-        {recording && <p className={SMALL_COLUMN}>{recording}</p>}
+        <Show when={recording()}>{(written) => <p class={SMALL_COLUMN}>{written()}</p>}</Show>
       </div>
     </>
   );
@@ -76,8 +79,8 @@ const SMALL_COLUMN =
  */
 function MistFilter() {
   return (
-    <svg aria-hidden width="0" height="0" className="absolute">
-      <filter id="inscription-mist" colorInterpolationFilters="sRGB">
+    <svg aria-hidden="true" width="0" height="0" class="absolute">
+      <filter id="inscription-mist" color-interpolation-filters="sRGB">
         <feGaussianBlur in="SourceAlpha" stdDeviation={12} result="spread" />
         <feComponentTransfer in="spread" result="column">
           <feFuncA type="linear" slope={6} />
@@ -98,7 +101,7 @@ function MistFilter() {
           result="torn"
         />
         <feGaussianBlur in="torn" stdDeviation={8} result="feathered" />
-        <feFlood style={{ floodColor: "var(--paper)" }} floodOpacity={0.9} />
+        <feFlood style={{ "flood-color": "var(--paper)" }} flood-opacity={0.9} />
         <feComposite in2="feathered" operator="in" result="mist" />
         <feMerge>
           <feMergeNode in="mist" />
@@ -110,34 +113,22 @@ function MistFilter() {
 }
 
 /** The name with its numbers and Latin set the way vertical Chinese sets them, never broken across columns. */
-function Inscribed({ text }: { text: string }) {
-  let offset = 0;
+function inscribed(text: string) {
   const room = `${SIDEWAYS_ROOM_EM / SIDEWAYS_SIZE_EM}em`;
   const runs = inscribedRuns(text);
   return runs.map(({ text: run, set }, index) => {
-    const key = offset;
-    offset += run.length;
     if (set === "characters") return run;
-    const first = index === 0;
-    const last = index === runs.length - 1;
+    if (set === "across")
+      return <span class="whitespace-nowrap [text-combine-upright:all]">{run}</span>;
     return (
       <span
-        key={key}
-        className={
-          set === "across"
-            ? "whitespace-nowrap [text-combine-upright:all]"
-            : "relative whitespace-nowrap tracking-[0.04em]"
-        }
-        style={
-          set === "sideways"
-            ? {
-                fontSize: `${SIDEWAYS_SIZE_EM}em`,
-                left: /[A-Za-z0-9]/.test(run) ? `-${SIDEWAYS_SHIFT_EM}em` : undefined,
-                marginInlineStart: first ? 0 : room,
-                marginInlineEnd: last ? 0 : room,
-              }
-            : undefined
-        }
+        class="relative whitespace-nowrap tracking-[0.04em]"
+        style={{
+          "font-size": `${SIDEWAYS_SIZE_EM}em`,
+          left: /[A-Za-z0-9]/.test(run) ? `-${SIDEWAYS_SHIFT_EM}em` : undefined,
+          "margin-inline-start": index === 0 ? 0 : room,
+          "margin-inline-end": index === runs.length - 1 ? 0 : room,
+        }}
       >
         {run}
       </span>

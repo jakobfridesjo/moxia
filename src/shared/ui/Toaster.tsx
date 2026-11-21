@@ -1,4 +1,4 @@
-import type { ToasterProps } from "sonner";
+import type { ToasterProps } from "solid-sonner";
 import { Toaster as SonnerToaster } from "@/shared/ui/shadcn/sonner.tsx";
 
 // Page padding (6px) + header row (40px) + a gap, so toasts never cover header

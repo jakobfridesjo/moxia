@@ -1,4 +1,3 @@
-import { useSelector } from "@tanstack/react-store";
 import type { Script } from "@/shared/api/commands.ts";
 import { languageAtom, type Language } from "@/shared/config/preferences.ts";
 import { en, type Messages } from "@/shared/i18n/messages-en.ts";
@@ -23,12 +22,25 @@ export const SCRIPT_NAMES: Record<Script, { name: string; lang: string }> = {
   hongKong: { name: "繁體（香港）", lang: "zh-Hant-HK" },
 };
 
-/** The UI text in the chosen language; re-renders when the language changes. */
+const followingLanguage = Object.defineProperties(
+  {},
+  Object.fromEntries(
+    Object.keys(en).map((section) => [
+      section,
+      { enumerable: true, get: () => MESSAGES[languageAtom()][section as keyof Messages] },
+    ])
+  )
+) as Messages;
+
+/**
+ * The UI text in the chosen language. Each section is read through the language signal, so
+ * `m.common.back` in JSX follows a change of language; never destructure it.
+ */
 export function useMessages(): Messages {
-  return MESSAGES[useSelector(languageAtom)];
+  return followingLanguage;
 }
 
-/** The UI text in the chosen language, for code outside a render (schema errors). */
+/** The UI text in the chosen language, for code outside a component (schema errors, the player store). */
 export function currentMessages(): Messages {
   return MESSAGES[languageAtom.get()];
 }

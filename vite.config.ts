@@ -1,6 +1,6 @@
 /// <reference types="vitest/config" />
 import { defineConfig, loadEnv, type Plugin } from "vite";
-import react from "@vitejs/plugin-react";
+import solid from "@solidjs/vite-plugin";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { playwright } from "@vitest/browser-playwright";
@@ -16,11 +16,12 @@ export default defineConfig(({ mode }) => {
 
   const plugins = [
     tanstackRouter({
+      target: "solid",
       routesDirectory: "./src/app/routes",
       generatedRouteTree: "./src/app/routeTree.gen.ts",
       autoCodeSplitting: true,
     }),
-    react({ compiler: true }),
+    solid(),
     tailwindcss(),
     // The dev server only feeds the Tauri window; its URL is useless in a browser.
     {
@@ -54,8 +55,6 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.VITE_BUILD_TIME": JSON.stringify(buildTime),
     },
     plugins,
-    // Found late by the browser dep scan otherwise; the re-optimization reloads every test page.
-    optimizeDeps: { include: ["react-dom/client"] },
     envDir,
     resolve: {
       alias: {
@@ -151,7 +150,6 @@ export default defineConfig(({ mode }) => {
         include: ["src/**/*.{ts,tsx}"],
         exclude: [
           "src/app/routeTree.gen.ts",
-          "src/shared/ui/shadcn/**",
           "src/app/main.tsx",
           "src/shared/test/**",
           "src/app/testing/**",

@@ -1,5 +1,4 @@
 import { page as screen } from "vitest/browser";
-import { render } from "vitest-browser-react";
 import { describe, expect, it, vi } from "vitest";
 import {
   createMemoryHistory,
@@ -8,7 +7,8 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
-} from "@tanstack/react-router";
+} from "@tanstack/solid-router";
+import { render } from "@/shared/test/solid.ts";
 import { AppCrashFallback, RouteErrorFallback } from "@/app/layouts/RouteFallbacks.tsx";
 
 function renderFailingRoute(loader: () => Promise<void>) {
@@ -25,7 +25,7 @@ function renderFailingRoute(loader: () => Promise<void>) {
     defaultErrorComponent: RouteErrorFallback,
   });
 
-  return render(<RouterProvider router={router} />);
+  return render(() => <RouterProvider router={router} />);
 }
 
 describe("RouteErrorFallback", () => {
@@ -37,7 +37,7 @@ describe("RouteErrorFallback", () => {
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValue(undefined);
 
-    await renderFailingRoute(loader);
+    renderFailingRoute(loader);
 
     await expect.element(screen.getByText("Something went wrong")).toBeVisible();
 
@@ -52,7 +52,7 @@ describe("AppCrashFallback", () => {
   it("offers a reload", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await render(<AppCrashFallback error={new Error("boom")} />);
+    render(() => <AppCrashFallback error={new Error("boom")} />);
 
     await expect.element(screen.getByRole("button", { name: "Reload" })).toBeVisible();
   });

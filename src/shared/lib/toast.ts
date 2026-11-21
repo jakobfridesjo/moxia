@@ -1,4 +1,4 @@
-import { toast } from "sonner";
+import { toast } from "solid-sonner";
 
 interface ToastOptions {
   id?: string;

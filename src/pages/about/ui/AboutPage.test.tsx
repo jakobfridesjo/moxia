@@ -6,7 +6,7 @@ import AboutPage from "@/pages/about/ui/AboutPage.tsx";
 
 describe("AboutPage", () => {
   it("shows the version and credits the station directory and libraries", async () => {
-    await renderPageInRouter(<AboutPage />);
+    await renderPageInRouter(() => <AboutPage />);
 
     await expect.element(screen.getByText(/^Version \d+\.\d+\.\d+/)).toBeVisible();
     await expect.element(screen.getByText("By Jakob Fridesjö")).toBeVisible();
@@ -19,7 +19,7 @@ describe("AboutPage", () => {
   });
 
   it("links to the licences page", async () => {
-    const { router } = await renderPageInRouter(<AboutPage />, { initialPath: "/about" });
+    const { router } = await renderPageInRouter(() => <AboutPage />, { initialPath: "/about" });
 
     await screen.getByRole("link", { name: "Show licences" }).click();
 
@@ -27,7 +27,7 @@ describe("AboutPage", () => {
   });
 
   it("goes back to the settings", async () => {
-    const { router } = await renderPageInRouter(<AboutPage />, { initialPath: "/about" });
+    const { router } = await renderPageInRouter(() => <AboutPage />, { initialPath: "/about" });
 
     await screen.getByRole("button", { name: "Back" }).click();
 

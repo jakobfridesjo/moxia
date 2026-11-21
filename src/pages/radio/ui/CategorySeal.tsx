@@ -18,71 +18,65 @@ const around = (category: CategoryFilter, step: -1 | 1) =>
  * A press turns it to the next; the ones either side wait as faint characters, and a press on one
  * goes straight there.
  */
-export function CategorySeal({
-  category,
-  onPick,
-}: {
+export function CategorySeal(props: {
   category: CategoryFilter;
   onPick: (category: CategoryFilter) => void;
 }) {
   const m = useMessages();
-  const next = around(category, 1);
+  const next = () => around(props.category, 1);
   return (
-    <div role="group" aria-label={m.radio.sealLabels.categories} className="flex items-center">
-      <Neighbour category={around(category, -1)} onPick={onPick} />
+    <div role="group" aria-label={m.radio.sealLabels.categories} class="flex items-center">
+      <Neighbour category={around(props.category, -1)} onPick={props.onPick} />
       <Seal
-        pressed={category !== "all"}
+        pressed={props.category !== "all"}
         aria-label={m.radio.sealLabels.category(
-          m.radio.categories[category],
-          m.radio.categories[next]
+          m.radio.categories[props.category],
+          m.radio.categories[next()]
         )}
-        onClick={() => onPick(next)}
+        onClick={() => props.onPick(next())}
       >
-        {m.radio.seals.categories[category]}
+        {m.radio.seals.categories[props.category]}
       </Seal>
-      <Neighbour category={next} onPick={onPick} />
+      <Neighbour category={next()} onPick={props.onPick} />
     </div>
   );
 }
 
 /** A category beside the seal: its character alone, worn like a seal's but with no stone around it. */
-function Neighbour({
-  category,
-  onPick,
-}: {
+function Neighbour(props: {
   category: CategoryFilter;
   onPick: (category: CategoryFilter) => void;
 }) {
   const m = useMessages();
-  const glyph = m.radio.seals.categories[category];
+  const glyph = () => m.radio.seals.categories[props.category];
   return (
     <button
       type="button"
       data-control
-      aria-label={m.radio.categories[category]}
-      className="shrink-0 cursor-pointer rounded-[3px] outline-none select-none focus-visible:ring-2 focus-visible:ring-ink"
+      aria-label={m.radio.categories[props.category]}
+      class="shrink-0 cursor-pointer rounded-[3px] outline-none select-none focus-visible:ring-2 focus-visible:ring-ink"
       onClick={() => {
         playKeyClick();
-        onPick(category);
+        props.onPick(props.category);
       }}
     >
       <svg
-        aria-hidden
+        aria-hidden="true"
         width={WIDTH}
         height={HEIGHT}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="opacity-40 mix-blend-multiply dark:mix-blend-normal"
+        class="opacity-40 mix-blend-multiply dark:mix-blend-normal"
       >
         <text
           x={WIDTH / 2}
           y={HEIGHT / 2}
-          fontSize={19}
-          textAnchor="middle"
-          dominantBaseline="central"
-          filter={glyphFilter(glyph)}
-          className="fill-seal font-serif font-black"
+          font-size="19"
+          text-anchor="middle"
+          dominant-baseline="central"
+          filter={glyphFilter(glyph())}
+          class="fill-seal font-serif font-black"
         >
-          {glyph}
+          {glyph()}
         </text>
       </svg>
     </button>

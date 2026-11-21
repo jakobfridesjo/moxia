@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { createSignal, For, onSettled, Show } from "solid-js";
+import { useNavigate } from "@tanstack/solid-router";
 import { useMessages } from "@/shared/i18n/messages.ts";
 import { formatShortDateTime } from "@/shared/lib/date.ts";
 import { formatTapeTime } from "@/shared/lib/duration.ts";
-import { cn } from "@/shared/lib/class-names.ts";
 import { nightAtom } from "@/shared/lib/night.ts";
 import { noteAt } from "@/pages/radio/model/radio-state.ts";
 import { useLocalSky } from "@/pages/radio/model/use-local-sky.ts";
@@ -31,21 +30,20 @@ function RadioManager() {
   const radio = useRadioManager();
   const navigate = useNavigate();
   const together = useListenTogether(radio.say);
-  const [pathOpen, setPathOpen] = useState(false);
-  const [sheet, setSheet] = useState<"together" | "chat" | null>(null);
-  const inRoom = together.room.status === "in";
-  const [welcome, setWelcome] = useState(true);
-  const [move, setMove] = useState<Move | null>(null);
-  const down = useRef<{ x: number; y: number } | null>(null);
-  const keys = useRef<HTMLDivElement>(null);
-  const { mode, station, tape } = radio;
-  const showing = tape?.station ?? station;
-  const playingBack = mode === "playback" || mode === "paused";
+  const [pathOpen, setPathOpen] = createSignal(false);
+  const [sheet, setSheet] = createSignal<"together" | "chat" | null>(null);
+  const inRoom = () => together.room.status === "in";
+  const [welcome, setWelcome] = createSignal(true);
+  const [move, setMove] = createSignal<Move | null>(null);
+  let down: { x: number; y: number } | null = null;
+  let keys: HTMLDivElement | undefined;
+  const showing = () => radio.tape?.station ?? radio.station;
+  const playingBack = () => radio.mode === "playback" || radio.mode === "paused";
 
-  useEffect(() => {
+  onSettled(() => {
     const timer = setTimeout(() => setWelcome(false), WELCOME_MS);
     return () => clearTimeout(timer);
-  }, []);
+  });
 
   // The painting moves the way the finger did: mist blows after it, a new place soaks in where it lifted.
   const seek = (step: -1 | 1) => {
@@ -64,14 +62,14 @@ function RadioManager() {
     radio.changeScene(step);
   };
 
-  useEffect(() => {
+  onSettled(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (pathOpen) {
+      if (pathOpen()) {
         if (event.key === "Escape") setPathOpen(false);
         return;
       }
-      if (sheet) {
+      if (sheet()) {
         if (event.key === "Escape") setSheet(null);
         return;
       }
@@ -93,71 +91,95 @@ function RadioManager() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  const nowLine = radio.error
-    ? radio.error
-    : radio.reconnecting
-      ? m.radio.reconnecting
-      : radio.connecting
-        ? m.radio.connecting
-        : tape
-          ? (noteAt(tape.notes, radio.tapePosition)?.title ?? null)
-          : mode === "live"
-            ? radio.nowPlaying
-              ? m.radio.onAir(radio.nowPlaying)
-              : m.radio.live
-            : station && m.radio.stopped;
-  const placeLine = tape
-    ? formatShortDateTime(tape.recordedAt)
-    : showing && [m.countries[showing.countryCode], showing.state].filter(Boolean).join(" · ");
-  const extraLine = radio.recordingTime
-    ? m.radio.recording(radio.recordingTime)
-    : tape
-      ? `${formatTapeTime(radio.tapePosition)} / ${formatTapeTime(tape.duration)}`
-      : null;
-  const title = showing?.name ?? (radio.loading ? m.radio.loading : m.radio.appName);
-  const programme = tape
-    ? (noteAt(tape.notes, radio.tapePosition)?.title ?? null)
-    : mode === "live"
-      ? radio.nowPlaying
-      : null;
+  const note = () => {
+    const tape = radio.tape;
+    return tape ? (noteAt(tape.notes, radio.tapePosition)?.title ?? null) : null;
+  };
+  const nowLine = () => {
+    if (radio.error) return radio.error;
+    if (radio.reconnecting) return m.radio.reconnecting;
+    if (radio.connecting) return m.radio.connecting;
+    if (radio.tape) return note();
+    if (radio.mode === "live")
+      return radio.nowPlaying ? m.radio.onAir(radio.nowPlaying) : m.radio.live;
+    return radio.station && m.radio.stopped;
+  };
+  const placeLine = () => {
+    const tape = radio.tape;
+    if (tape) return formatShortDateTime(tape.recordedAt);
+    const shown = showing();
+    return shown && [m.countries[shown.countryCode], shown.state].filter(Boolean).join(" · ");
+  };
+  const extraLine = () => {
+    const tape = radio.tape;
+    if (radio.recordingTime) return m.radio.recording(radio.recordingTime);
+    return tape ? `${formatTapeTime(radio.tapePosition)} / ${formatTapeTime(tape.duration)}` : null;
+  };
+  const title = () => showing()?.name ?? (radio.loading ? m.radio.loading : m.radio.appName);
+  const programme = () => (radio.tape ? note() : radio.mode === "live" ? radio.nowPlaying : null);
   // The inscription is written in Chinese; what needs reading in the interface's language shows below it.
-  const notice =
+  const notice = () =>
     radio.error ??
     (radio.reconnecting
       ? m.radio.reconnecting
       : radio.connecting
         ? m.radio.connecting
-        : extraLine) ??
+        : extraLine()) ??
     (radio.subtitles === "loading" ? m.radio.subtitlesLoading : null);
-  const region = showing?.countryCode ?? "CN";
-  const sky = useLocalSky(region, showing ?? null);
-  const playing = mode === "live" || mode === "playback";
+  const region = () => showing()?.countryCode ?? "CN";
+  const sky = useLocalSky(region, () => showing() ?? null);
+  const playing = () => radio.mode === "live" || radio.mode === "playback";
   useMediaControls(
-    { title: showing?.name ?? null, artist: programme, playing },
-    { toggle: radio.toggle, seek: radio.seek, playing }
+    {
+      get title() {
+        return showing()?.name ?? null;
+      },
+      get artist() {
+        return programme();
+      },
+      get playing() {
+        return playing();
+      },
+    },
+    {
+      toggle: radio.toggle,
+      seek: radio.seek,
+      get playing() {
+        return playing();
+      },
+    }
   );
-  const hint =
+  const hint = () =>
     radio.hint ??
-    notice ??
-    (welcome || mode === "idle" || mode === "stopped" || mode === "paused"
-      ? playingBack
+    notice() ??
+    (welcome() || radio.mode === "idle" || radio.mode === "stopped" || radio.mode === "paused"
+      ? playingBack()
         ? m.radio.hintPlayback
         : m.radio.hint
-      : programme);
+      : programme());
+
+  const leavePath = () => {
+    setPathOpen(false);
+    radio.leaveRecordings();
+  };
+  const leaveRoom = () => {
+    together.leave();
+    setSheet(null);
+  };
 
   return (
     <>
       <main
         aria-label={m.radio.label}
         aria-describedby="radio-gestures"
-        className="fixed inset-0 touch-none overflow-hidden bg-paper text-ink select-none"
+        class="fixed inset-0 touch-none overflow-hidden bg-paper text-ink select-none"
         onPointerDown={(event) => {
           if ((event.target as HTMLElement).closest("[data-control]")) return;
-          down.current = { x: event.clientX, y: event.clientY };
+          down = { x: event.clientX, y: event.clientY };
         }}
         onPointerUp={(event) => {
-          const start = down.current;
-          down.current = null;
+          const start = down;
+          down = null;
           if (!start) return;
           const dx = event.clientX - start.x;
           const dy = event.clientY - start.y;
@@ -170,35 +192,40 @@ function RadioManager() {
           else if (Math.hypot(dx, dy) < 12) radio.toggle();
         }}
       >
-        <p id="radio-gestures" className="sr-only">
+        <p id="radio-gestures" class="sr-only">
           {m.radio.gestures}
         </p>
         <InkScene
-          region={region}
-          station={showing ?? null}
-          listening={(mode === "live" && !radio.reconnecting) || mode === "playback"}
+          region={region()}
+          station={showing() ?? null}
+          listening={(radio.mode === "live" && !radio.reconnecting) || radio.mode === "playback"}
           writing={radio.recording}
-          move={move}
+          move={move()}
           sky={sky}
-          covered={pathOpen}
-          keys={keys}
+          covered={pathOpen()}
+          keys={() => keys}
         />
 
-        <div role="status" aria-live="polite" className="sr-only">
-          {[title, nowLine, placeLine, extraLine].filter(Boolean).map((line) => (
-            <p key={line}>{line}</p>
-          ))}
+        <div role="status" aria-live="polite" class="sr-only">
+          <For
+            each={[title(), nowLine(), placeLine(), extraLine()].filter((line): line is string =>
+              Boolean(line)
+            )}
+            keyed={false}
+          >
+            {(line) => <p>{line()}</p>}
+          </For>
         </div>
         <SealInk />
         <Inscription
-          title={title}
-          station={showing ?? null}
-          recordedAt={tape?.recordedAt ?? null}
+          title={title()}
+          station={showing() ?? null}
+          recordedAt={radio.tape?.recordedAt ?? null}
         />
 
         <div
-          ref={keys}
-          className="absolute top-[max(1rem,env(safe-area-inset-top))] left-[max(1rem,env(safe-area-inset-left))] grid grid-cols-2 gap-2"
+          ref={(element) => (keys = element)}
+          class="absolute top-[max(1rem,env(safe-area-inset-top))] left-[max(1rem,env(safe-area-inset-left))] grid grid-cols-2 gap-2"
         >
           <Seal
             aria-label={m.radio.sealLabels.settings}
@@ -207,7 +234,7 @@ function RadioManager() {
             {m.radio.seals.settings}
           </Seal>
           <Seal
-            pressed={pathOpen}
+            pressed={pathOpen()}
             aria-label={m.radio.sealLabels.recordings}
             onClick={() => {
               radio.openRecordings();
@@ -233,11 +260,11 @@ function RadioManager() {
           >
             {m.radio.seals.subtitles}
           </Seal>
-          <div className="relative grid">
+          <div class="relative grid">
             <Seal
-              pressed={inRoom}
+              pressed={inRoom()}
               aria-label={
-                inRoom
+                inRoom()
                   ? m.radio.sealLabels.togetherIn(together.room.count)
                   : m.radio.sealLabels.together
               }
@@ -245,35 +272,39 @@ function RadioManager() {
             >
               {m.radio.seals.together}
             </Seal>
-            {inRoom && (
+            <Show when={inRoom()}>
               <span
-                aria-hidden
-                className="pointer-events-none absolute top-1/2 left-full ml-2.5 -translate-y-1/2 font-brush text-2xl font-bold text-seal [text-shadow:0_0_2px_var(--paper),0_0_6px_var(--paper),0_0_12px_var(--paper)]"
+                aria-hidden="true"
+                class="pointer-events-none absolute top-1/2 left-full ml-2.5 -translate-y-1/2 font-brush text-2xl font-bold text-seal [text-shadow:0_0_2px_var(--paper),0_0_6px_var(--paper),0_0_12px_var(--paper)]"
               >
                 {together.room.count}
               </span>
-            )}
+            </Show>
           </div>
         </div>
 
-        {inRoom && sheet !== "chat" && <ChatDrift lines={together.room.lines} />}
+        <Show when={inRoom() && sheet() !== "chat"}>
+          <ChatDrift lines={together.room.lines} />
+        </Show>
 
-        <div className="absolute right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))] flex items-end">
+        <div class="absolute right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))] flex items-end">
           <PresetBlock
             slots={radio.presets}
-            onAirId={mode === "live" ? (station?.id ?? null) : null}
+            onAirId={radio.mode === "live" ? (radio.station?.id ?? null) : null}
             onPlay={radio.playPreset}
             onStore={radio.storePreset}
           />
-          <div className="flex h-11 flex-1 items-center justify-center">
-            {!playingBack && <CategorySeal category={radio.category} onPick={radio.pickCategory} />}
+          <div class="flex h-11 flex-1 items-center justify-center">
+            <Show when={!playingBack()}>
+              <CategorySeal category={radio.category} onPick={radio.pickCategory} />
+            </Show>
           </div>
-          <div className="flex items-center gap-4">
-            {inRoom && (
+          <div class="flex items-center gap-4">
+            <Show when={inRoom()}>
               <Seal aria-label={m.radio.sealLabels.chat} onClick={() => setSheet("chat")}>
                 {m.radio.seals.chat}
               </Seal>
-            )}
+            </Show>
             <Seal
               shape="round"
               pressed={radio.recording}
@@ -287,61 +318,52 @@ function RadioManager() {
           </div>
         </div>
 
-        {pathOpen && (
+        <Show when={pathOpen()}>
           <MountainPath
             tapes={radio.tapes}
-            playing={mode === "playback" ? tape : null}
-            hint={radio.hint ?? notice}
+            playing={radio.mode === "playback" ? radio.tape : null}
+            hint={radio.hint ?? notice()}
             onPlay={(chosen) =>
-              chosen.id === tape?.id ? radio.toggle() : radio.playRecording(chosen)
+              chosen.id === radio.tape?.id ? radio.toggle() : radio.playRecording(chosen)
             }
             onBreak={(broken) => {
-              if (mode === "playback" && broken.id === tape?.id) radio.toggle();
+              if (radio.mode === "playback" && broken.id === radio.tape?.id) radio.toggle();
               radio.say(nightAtom.get() ? m.radio.unburnHint : m.radio.mendHint);
             }}
             onDelete={radio.deleteRecording}
-            onLeave={() => {
-              setPathOpen(false);
-              radio.leaveRecordings();
-            }}
+            onLeave={leavePath}
           />
-        )}
+        </Show>
 
         <p
-          aria-hidden
-          className={cn(
+          aria-hidden="true"
+          class={[
             "pointer-events-none absolute right-[max(1.75rem,env(safe-area-inset-right))] bottom-[calc(max(1.5rem,env(safe-area-inset-bottom))+6.5rem)] max-w-[80%] text-right font-serif text-sm font-bold tracking-wide text-ink [text-shadow:0_0_1px_var(--paper),0_0_2px_var(--paper),0_0_2px_var(--paper),0_0_3px_var(--paper),0_0_6px_var(--paper),0_0_12px_var(--paper),0_0_20px_var(--paper)] transition-opacity duration-700",
-            hint ? "opacity-100" : "opacity-0"
-          )}
+            hint() ? "opacity-100" : "opacity-0",
+          ]}
         >
-          {hint}
+          {hint()}
         </p>
       </main>
-      {sheet === "together" && (
+      <Show when={sheet() === "together"}>
         <TogetherSheet
           room={together.room}
           name={together.name}
           onName={together.setName}
           onOpen={together.open}
           onJoin={together.join}
-          onLeave={() => {
-            together.leave();
-            setSheet(null);
-          }}
+          onLeave={leaveRoom}
           onClose={() => setSheet(null)}
         />
-      )}
-      {sheet === "chat" && inRoom && (
+      </Show>
+      <Show when={sheet() === "chat" && inRoom()}>
         <RoomChat
           room={together.room}
           onSay={together.say}
-          onLeave={() => {
-            together.leave();
-            setSheet(null);
-          }}
+          onLeave={leaveRoom}
           onClose={() => setSheet(null)}
         />
-      )}
+      </Show>
     </>
   );
 }
