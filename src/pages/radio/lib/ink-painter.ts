@@ -896,20 +896,34 @@ let measurer: Context | null | undefined;
 /** x, y, width and height, in pixels. */
 type Rect = [number, number, number, number];
 
-/** One page of a caption, written once with its halo at full ink, and where each cell of it lies. */
-interface Page {
+/** One cell's paper halo, drawn alone, and its top-left corner on the screen, in pixels. */
+interface Halo {
   canvas: HTMLCanvasElement;
+  at: [number, number];
+}
+
+/** One page of a caption: its glyphs written once at full ink, and the halos of the cells written so far. */
+interface Page {
+  glyphs: HTMLCanvasElement;
+  /** The halos of the cells that have taken all their ink, laid down for good. */
+  dried: CanvasRenderingContext2D;
+  dry: Set<number>;
+  /** The halos of the cells still taking ink. */
+  wet: Map<number, Halo>;
   /** The page's top-left corner on the screen, in pixels. */
   at: [number, number];
-  /** Each cell's part of the page, in screen pixels, tiling it without overlap. */
+  /** Each cell's part of the glyphs, in screen pixels, tiling the page without overlap. */
   cells: Map<number, Rect>;
+  /** Where each cell's glyph is written, in units. */
+  spots: Map<number, [number, number]>;
 }
 
 /**
  * A subtitle written in `box` (in units `unit` pixels each): from its top-left corner, line after
  * line down it, starting again at the top once the box is full, each cell of `layout` with as
  * much ink as `inks` gives it, haloed in paper so the painting never runs through them, in
- * `tone`'s writing. Each page is written once, haloed, and only copied after, cell by cell.
+ * `tone`'s writing. Each page's glyphs are written once and copied cell by cell; each cell's halo
+ * is drawn once, whole, fades in with its cell and is then laid down with the others.
  */
 export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: number) {
   measurer ??= document.createElement("canvas").getContext("2d");
@@ -922,6 +936,45 @@ export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: num
   const fit = Math.max(1, Math.floor((bottom - top) / row));
   const pages = new Map<number, Page>();
 
+  const pen = (ctx: Context, at: readonly [number, number]) => {
+    ctx.setTransform(unit, 0, 0, unit, -at[0], -at[1]);
+    ctx.font = `700 ${glyph}px ${CAPTION_FONT}`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+  };
+
+  /** A soft wash of paper behind one cell, which lifts it off the painting without a hard outline. */
+  const haloOf = (index: number, spot: [number, number]): Halo | null => {
+    const cell = layout.cells[index];
+    if (!cell) return null;
+    const bleed = CAPTION_BLEED;
+    const advance = advances[index] ?? 0;
+    const inset = layout.chinese ? (advance - size) / 2 : 0;
+    const at: [number, number] = [
+      Math.floor((spot[0] - inset - bleed) * unit),
+      Math.floor((spot[1] - readings - bleed) * unit),
+    ];
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.ceil((advance + 2 * bleed) * unit) + 1);
+    canvas.height = Math.max(1, Math.ceil((readings + glyph + 2 * bleed) * unit) + 1);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    pen(ctx, at);
+    ctx.fillStyle = `rgba(${tone.paper},0.6)`;
+    ctx.strokeStyle = ctx.fillStyle;
+    ctx.lineWidth = size * CAPTION_HALO;
+    ctx.lineJoin = "round";
+    ctx.shadowColor = `rgb(${tone.paper})`;
+    // Shadows ignore the transform, so the blur is scaled to the screen by hand.
+    for (const blur of CAPTION_SHADOW) {
+      ctx.shadowBlur = size * blur * unit;
+      ctx.strokeText(cell.glyph, ...spot);
+      ctx.fillText(cell.glyph, ...spot);
+      if (cell.reading) writeReading(ctx, cell.reading, [spot[0] + size / 2, spot[1]], size, true);
+    }
+    return { canvas, at };
+  };
+
   const write = (first: number): Page | null => {
     const shown = lines.slice(first, first + fit);
     const bleed = CAPTION_BLEED;
@@ -929,12 +982,15 @@ export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: num
       Math.floor((left - bleed) * unit),
       Math.floor((top - bleed) * unit),
     ];
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.ceil((right - left + 2 * bleed) * unit));
-    canvas.height = Math.max(1, Math.ceil((shown.length * row + 2 * bleed) * unit));
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.setTransform(unit, 0, 0, unit, -at[0], -at[1]);
+    const width = Math.max(1, Math.ceil((right - left + 2 * bleed) * unit));
+    const height = Math.max(1, Math.ceil((shown.length * row + 2 * bleed) * unit));
+    const glyphs = document.createElement("canvas");
+    const halos = document.createElement("canvas");
+    glyphs.width = halos.width = width;
+    glyphs.height = halos.height = height;
+    const ctx = glyphs.getContext("2d");
+    const dried = halos.getContext("2d");
+    if (!ctx || !dried) return null;
     const spots = new Map<number, [number, number]>();
     const cells = new Map<number, Rect>();
     shown.forEach((line, number) => {
@@ -952,38 +1008,18 @@ export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: num
         along += advance;
       });
     });
-    ctx.font = `700 ${glyph}px ${CAPTION_FONT}`;
-    ctx.textBaseline = "top";
-    ctx.textAlign = "left";
-    const each = (halo: boolean) => {
-      for (const [index, spot] of spots) {
-        const cell = layout.cells[index];
-        if (!cell) continue;
-        if (halo) ctx.strokeText(cell.glyph, ...spot);
-        ctx.fillText(cell.glyph, ...spot);
-        if (cell.reading)
-          writeReading(ctx, cell.reading, [spot[0] + size / 2, spot[1]], size, halo);
-      }
-    };
-    // A soft wash of paper behind the words lifts them off the painting without a hard outline.
-    ctx.save();
-    ctx.fillStyle = `rgba(${tone.paper},0.6)`;
-    ctx.strokeStyle = ctx.fillStyle;
-    ctx.lineWidth = size * CAPTION_HALO;
-    ctx.lineJoin = "round";
-    ctx.shadowColor = `rgb(${tone.paper})`;
-    // Shadows ignore the transform, so the blur is scaled to the screen by hand.
-    for (const blur of CAPTION_SHADOW) {
-      ctx.shadowBlur = size * blur * unit;
-      each(true);
-    }
-    ctx.restore();
+    pen(ctx, at);
     ctx.fillStyle = `rgba(${tone.writing},0.92)`;
-    each(false);
-    return { canvas, at, cells };
+    for (const [index, spot] of spots) {
+      const cell = layout.cells[index];
+      if (!cell) continue;
+      ctx.fillText(cell.glyph, ...spot);
+      if (cell.reading) writeReading(ctx, cell.reading, [spot[0] + size / 2, spot[1]], size, false);
+    }
+    return { glyphs, dried, dry: new Set(), wet: new Map(), at, cells, spots };
   };
 
-  /** Copies the page being written onto `ctx` (which draws in pixels), each cell as inked as `inks` says, all at `alpha`. */
+  /** Draws the page being written onto `ctx` (which draws in pixels), each cell as inked as `inks` says, all at `alpha`. */
   return (ctx: Context, inks: readonly number[], alpha: number) => {
     // Only the lines from the last time the box was started again show: the one being written in.
     const writing = lines.findLastIndex((line) => line.some((index) => (inks[index] ?? 0) > 0));
@@ -995,13 +1031,41 @@ export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: num
       page = written;
       pages.set(first, page);
     }
-    const { canvas, at, cells } = page;
+    const { glyphs, dried, dry, wet, at, cells, spots } = page;
+    for (const index of dry) {
+      if ((inks[index] ?? 0) >= 1) continue;
+      dried.clearRect(0, 0, dried.canvas.width, dried.canvas.height);
+      dry.clear();
+      break;
+    }
+    for (const [index, spot] of spots) {
+      const ink = inks[index] ?? 0;
+      if (ink <= 0 || dry.has(index)) continue;
+      const halo = wet.get(index) ?? haloOf(index, spot);
+      if (!halo) continue;
+      if (ink < 1) {
+        wet.set(index, halo);
+        continue;
+      }
+      dried.drawImage(halo.canvas, halo.at[0] - at[0], halo.at[1] - at[1]);
+      wet.delete(index);
+      dry.add(index);
+    }
     ctx.save();
+    // Every halo lies under every glyph, so a new cell's wash never dulls the writing beside it.
+    if (dry.size > 0) {
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(dried.canvas, ...at);
+    }
+    for (const [index, halo] of wet) {
+      ctx.globalAlpha = alpha * Math.min(1, Math.max(0, inks[index] ?? 0));
+      ctx.drawImage(halo.canvas, ...halo.at);
+    }
     for (const [index, [x, y, w, h]] of cells) {
       const ink = inks[index] ?? 0;
       if (ink <= 0 || w <= 0 || h <= 0) continue;
       ctx.globalAlpha = alpha * Math.min(1, ink);
-      ctx.drawImage(canvas, x - at[0], y - at[1], w, h, x, y, w, h);
+      ctx.drawImage(glyphs, x - at[0], y - at[1], w, h, x, y, w, h);
     }
     ctx.restore();
   };
