@@ -1,7 +1,7 @@
 import type { CountryCode } from "@/shared/api/commands.ts";
 import type { Air } from "@/pages/radio/lib/air.ts";
 import type { Tone } from "@/pages/radio/lib/ink-tone.ts";
-import { blurred, blurredTile } from "@/pages/radio/lib/soften.ts";
+import { blurred, softenTile } from "@/pages/radio/lib/soften.ts";
 import type { InkGL, InkLayers } from "@/pages/radio/lib/ink-gl.ts";
 import { fallsBox, pour, type FallsLook, type Rows } from "@/pages/radio/lib/ink-falls.ts";
 
@@ -161,14 +161,20 @@ function fogTile(color: string, softness = 0) {
   if (!ctx) return tile;
   const pixels = ctx.createImageData(256, 256);
   const [r, g, b] = color.split(",").map(Number);
-  noise.forEach((value, i) => {
+  const alpha = Float32Array.from(noise, (value) => {
     const t = clamp((value - 0.3) / 0.38);
-    pixels.data.set([r, g, b, t * t * (3 - 2 * t) * 255], i * 4);
+    return t * t * (3 - 2 * t) * 255;
   });
+  if (softness > 0) softenTile(alpha, 256, 256, softness);
+  for (let i = 0; i < alpha.length; i++) {
+    pixels.data[i * 4] = r;
+    pixels.data[i * 4 + 1] = g;
+    pixels.data[i * 4 + 2] = b;
+    pixels.data[i * 4 + 3] = alpha[i];
+  }
   ctx.putImageData(pixels, 0, 0);
-  const made = softness > 0 ? blurredTile(tile, softness) : tile;
-  fogTiles.set(key, made);
-  return made;
+  fogTiles.set(key, tile);
+  return tile;
 }
 
 const puffSprites = new Map<string, HTMLCanvasElement>();
@@ -298,7 +304,7 @@ function cutouts(sky: Sky, boxes: Box[], soft = 0) {
   });
 }
 
-/** A painted wisp's ink laid `body` times over and softened, so its faint wash can carry a colour. */
+/** A painted wisp's ink laid `body` times over and softened, so its faint wash can carry a colour; only its shape is kept. */
 function thickened(wisp: HTMLCanvasElement, body: number, ratio: number) {
   if (body <= 1) return wisp;
   const g = wisp.getContext("2d", { willReadFrequently: true });
@@ -307,7 +313,7 @@ function thickened(wisp: HTMLCanvasElement, body: number, ratio: number) {
   for (let i = 3; i < pixels.data.length; i += 4)
     pixels.data[i] = Math.min(255, pixels.data[i] * body);
   g.putImageData(pixels, 0, 0);
-  return blurred(wisp, 3 * ratio);
+  return blurred(wisp, 3 * ratio, [0, 0, 0]);
 }
 
 /** A point on a polyline at `t` (0 to 1 over its segments, carried on past 1), with the unit normal there. */

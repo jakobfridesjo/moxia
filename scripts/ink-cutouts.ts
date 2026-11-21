@@ -1,5 +1,6 @@
 // Cuts the ink out of CC0 paintings from the Cleveland Museum of Art into
 // transparent WebP layers, as listed in src/pages/radio/ui/ink/cutouts.json.
+// The old man on the monastery path's bridge is then cut from that layer, as "traveller".
 // Usage: node scripts/ink-cutouts.ts [name ...]
 import { createWriteStream } from "node:fs";
 import { access, mkdir, readFile, rename } from "node:fs/promises";
@@ -7,6 +8,9 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream } from "node:stream/web";
 import sharp from "sharp";
+// Node runs this script as it is, without the `@/` alias.
+// oxlint-disable-next-line no-restricted-imports
+import { TRAVELLER, travellerPart } from "../src/pages/radio/lib/scroll-path.ts";
 
 /** Left, top, right, bottom, as fractions of the whole painting. */
 type Box = [number, number, number, number];
@@ -297,12 +301,60 @@ async function cut(cutout: Cutout) {
   say(`${cutout.name}: ${width}×${height}`);
 }
 
+/** The scroll the old man stands in, and the name his own cut goes by. */
+const SCROLL_LAYER = "monastery-path";
+const TRAVELLER_NAME = "traveller";
+
+/**
+ * The old man cut from the scroll's layer as the app shows it: his body and his cane apart, so
+ * the cane can swing, and a mask of where he stood, to take him out of the painting once he walks off.
+ */
+async function cutTraveller() {
+  const { left, top, width, height } = TRAVELLER;
+  const ink = await sharp(`${OUT}/${SCROLL_LAYER}.webp`)
+    .extract({ left, top, width, height })
+    .ensureAlpha()
+    .raw()
+    .toBuffer();
+  const parts = { body: Buffer.alloc(ink.length), cane: Buffer.alloc(ink.length) };
+  const hole = Buffer.alloc(ink.length);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const part = travellerPart(left + x, top + y, ink[i + 3]);
+      if (!part) continue;
+      ink.copy(parts[part], i, i, i + 4);
+      // Paper over the stroke and a pixel round it, fully, so no ghost of him stays.
+      for (const [ox, oy] of [
+        [0, 0],
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ]) {
+        const [cx, cy] = [x + ox, y + oy];
+        if (cx >= 0 && cy >= 0 && cx < width && cy < height) hole[(cy * width + cx) * 4 + 3] = 255;
+      }
+    }
+  }
+  const raw = { raw: { width, height, channels: 4 as const } };
+  for (const [name, pixels] of Object.entries({ ...parts, hole }))
+    await sharp(pixels, raw)
+      .webp({ lossless: true })
+      .toFile(`${OUT}/${TRAVELLER_NAME}-${name}.webp`);
+  say(`${TRAVELLER_NAME}: ${width}×${height}`);
+}
+
 const cutouts = JSON.parse(await readFile(MANIFEST, "utf8")) as Cutout[];
 const wanted = process.argv.slice(2);
-const unknown = wanted.filter((name) => !cutouts.some((cutout) => cutout.name === name));
+const unknown = wanted.filter(
+  (name) => name !== TRAVELLER_NAME && !cutouts.some((cutout) => cutout.name === name)
+);
 if (unknown.length) throw new Error(`No cut-out named ${unknown.join(", ")} in ${MANIFEST}`);
 await mkdir(`${CACHE}/preview`, { recursive: true });
 for (const cutout of cutouts) {
   if (wanted.length === 0 || wanted.includes(cutout.name)) await cut(cutout);
 }
+if (wanted.length === 0 || wanted.includes(SCROLL_LAYER) || wanted.includes(TRAVELLER_NAME))
+  await cutTraveller();
 say(`Previews on paper: ${CACHE}/preview/`);

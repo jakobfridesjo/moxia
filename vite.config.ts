@@ -23,6 +23,18 @@ export default defineConfig(({ mode }) => {
     }),
     solid(),
     tailwindcss(),
+    // Every webview Tauri runs in reads WOFF2, so the WOFF copies fontsource also lists are never fetched.
+    {
+      name: "drop-woff-fallbacks",
+      apply: "build",
+      generateBundle(_, bundle) {
+        for (const [name, file] of Object.entries(bundle)) {
+          if (name.endsWith(".woff")) delete bundle[name];
+          else if (name.endsWith(".css") && file.type === "asset")
+            file.source = String(file.source).replace(/,url\([^)]+\.woff\)format\("woff"\)/g, "");
+        }
+      },
+    } satisfies Plugin,
     // The dev server only feeds the Tauri window; its URL is useless in a browser.
     {
       name: "hide-dev-server-urls",

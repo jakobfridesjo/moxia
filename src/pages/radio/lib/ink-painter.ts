@@ -430,17 +430,24 @@ interface Turn {
 }
 
 /**
- * A pixel mask of `keep` without `drop`, on the canvas's grid. Its edge is hard,
- * not smoothed, so the hole cut with it and the piece cut with it fit exactly:
- * two smoothed edges meeting would leave a pale seam through every stroke.
+ * A pixel mask of `keep` without `drop`, on the grid of a `width`×`height` canvas: only the
+ * box `keep` reaches, with where its corner lies. Its edge is hard, not smoothed, so the hole
+ * cut with it and the piece cut with it fit exactly: two smoothed edges meeting would leave a
+ * pale seam through every stroke.
  */
 function mask(width: number, height: number, transform: Transform, keep: Point[], drop?: Point[]) {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  const [a, b, c, d, e, f] = transform;
+  const xs = keep.map(([x, y]) => a * x + c * y + e);
+  const ys = keep.map(([x, y]) => b * x + d * y + f);
+  const x = Math.max(0, Math.floor(Math.min(...xs)) - 1);
+  const y = Math.max(0, Math.floor(Math.min(...ys)) - 1);
+  const w = Math.min(width, Math.ceil(Math.max(...xs)) + 1) - x;
+  const h = Math.min(height, Math.ceil(Math.max(...ys)) + 1) - y;
+  if (w <= 0 || h <= 0) return null;
+  const canvas = canvasOf(w, h);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return null;
-  ctx.setTransform(...transform);
+  ctx.setTransform(a, b, c, d, e - x, f - y);
   outline(ctx, keep);
   ctx.fill();
   if (drop) {
@@ -449,22 +456,31 @@ function mask(width: number, height: number, transform: Transform, keep: Point[]
     ctx.fill();
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const pixels = ctx.getImageData(0, 0, width, height);
+  const pixels = ctx.getImageData(0, 0, w, h);
   const alpha = pixels.data;
-  let [left, top, right, bottom] = [width, height, -1, -1];
-  for (let i = 3; i < alpha.length; i += 4) {
-    alpha[i] = alpha[i] >= 128 ? 255 : 0;
-    if (!alpha[i]) continue;
-    const x = ((i - 3) / 4) % width;
-    const y = Math.floor((i - 3) / 4 / width);
-    left = Math.min(left, x);
-    right = Math.max(right, x);
-    top = Math.min(top, y);
-    bottom = Math.max(bottom, y);
+  let [left, top, right, bottom] = [w, h, -1, -1];
+  for (let row = 0; row < h; row++) {
+    for (let column = 0; column < w; column++) {
+      const i = (row * w + column) * 4 + 3;
+      alpha[i] = alpha[i] >= 128 ? 255 : 0;
+      if (!alpha[i]) continue;
+      left = Math.min(left, column);
+      right = Math.max(right, column);
+      top = Math.min(top, row);
+      bottom = row;
+    }
   }
   ctx.putImageData(pixels, 0, 0);
   if (right < 0) return null;
-  return { canvas, left, top, width: right - left + 1, height: bottom - top + 1 };
+  return {
+    canvas,
+    /** Where the mask's canvas lies. */
+    at: [x, y] as const,
+    left: x + left,
+    top: y + top,
+    width: right - left + 1,
+    height: bottom - top + 1,
+  };
 }
 
 function canvasOf(width: number, height: number) {
@@ -481,14 +497,14 @@ function cutPiece(ink: Context, cut: NonNullable<ReturnType<typeof mask>>): Piec
   const shapeCtx = shape.getContext("2d");
   const pieceCtx = piece.getContext("2d");
   if (!shapeCtx || !pieceCtx) return null;
-  shapeCtx.drawImage(cut.canvas, -cut.left, -cut.top);
+  shapeCtx.drawImage(cut.canvas, cut.at[0] - cut.left, cut.at[1] - cut.top);
   pieceCtx.drawImage(ink.canvas, -cut.left, -cut.top);
   pieceCtx.globalCompositeOperation = "destination-in";
   pieceCtx.drawImage(shape, 0, 0);
   ink.save();
   ink.setTransform(1, 0, 0, 1, 0, 0);
   ink.globalCompositeOperation = "destination-out";
-  ink.drawImage(cut.canvas, 0, 0);
+  ink.drawImage(cut.canvas, ...cut.at);
   ink.restore();
   return {
     ink: piece,

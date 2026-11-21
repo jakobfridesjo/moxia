@@ -4,18 +4,18 @@ All tasks are mise tasks, run from the repo root. `mise tasks` lists them.
 
 ## System packages
 
-The Rust side needs the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/), plus the ALSA headers for sound output on Linux, and `cmake` and a C++ compiler for SentencePiece, the translator's tokenizer.
+The Rust side needs the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) plus the ALSA headers for sound output on Linux.
 
 **Fedora**
 
 ```bash
-sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file libappindicator-gtk3-devel librsvg2-devel alsa-lib-devel gcc-c++ cmake
+sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file libappindicator-gtk3-devel librsvg2-devel alsa-lib-devel
 ```
 
 **Ubuntu or Debian** (also under WSL)
 
 ```bash
-sudo apt install libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libgtk-3-dev libasound2-dev build-essential pkg-config curl wget file cmake
+sudo apt install libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libgtk-3-dev libasound2-dev build-essential pkg-config curl wget file
 ```
 
 **Fedora Atomic Desktop**

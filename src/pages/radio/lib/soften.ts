@@ -85,6 +85,43 @@ function blurAlphaLines(
   }
 }
 
+/** As `blurAlphaLines`, for lines that repeat: what lies beyond one end is the other end. */
+function blurRepeatingLines(
+  data: Float32Array,
+  { count, length, stride, step }: { count: number; length: number; stride: number; step: number },
+  radius: number
+) {
+  const line = new Float32Array(length);
+  const span = radius * 2 + 1;
+  const wrapped = (k: number) => ((k % length) + length) % length;
+  for (let l = 0; l < count; l++) {
+    const start = l * stride;
+    for (let k = 0, at = start; k < length; k++, at += step) line[k] = data[at];
+    let sum = 0;
+    for (let k = -radius; k <= radius; k++) sum += line[wrapped(k)];
+    for (let k = 0, at = start; k < length; k++, at += step) {
+      data[at] = sum / span;
+      sum += line[wrapped(k + radius + 1)] - line[wrapped(k - radius)];
+    }
+  }
+}
+
+/** The box blur three passes of which soften like a Gaussian of `sigma` pixels. */
+const boxRadius = (sigma: number) =>
+  Math.max(1, Math.round((Math.sqrt(4 * sigma ** 2 + 1) - 1) / 2));
+
+/**
+ * Softens `alpha`, one number a pixel of a `width`×`height` tile that repeats, like CSS
+ * `blur(sigma px)`, across its edges so it still repeats.
+ */
+export function softenTile(alpha: Float32Array, width: number, height: number, sigma: number) {
+  const radius = boxRadius(sigma);
+  for (let pass = 0; pass < 3; pass++) {
+    blurRepeatingLines(alpha, { count: height, length: width, stride: width, step: 1 }, radius);
+    blurRepeatingLines(alpha, { count: width, length: height, stride: 1, step: width }, radius);
+  }
+}
+
 /** Softens the alpha of `pixels` within `box`, leaving every pixel it reaches the one colour `tint`. */
 function softenAlpha(
   pixels: ImageData,
@@ -156,7 +193,7 @@ function shrunk(width: number, height: number, sigma: number) {
  */
 function soften(ctx: Context, sigma: number, tint?: Tint) {
   const { width: w, height: h } = ctx.canvas;
-  const radius = Math.max(1, Math.round((Math.sqrt(4 * sigma ** 2 + 1) - 1) / 2));
+  const radius = boxRadius(sigma);
   const pixels = ctx.getImageData(0, 0, w, h);
   const box = inkedBox(pixels, radius * 3);
   if (!box) return;
@@ -196,9 +233,10 @@ function soften(ctx: Context, sigma: number, tint?: Tint) {
 /**
  * `source` softened like CSS `blur(sigma px)`, on a canvas of its own. Done by hand because WebKit's
  * canvas has no `filter`, so the app's webview would leave every edge hard: shrunk so the blur is a
- * few pixels wide, blurred there, and smoothed back up.
+ * few pixels wide, blurred there, and smoothed back up. `tint` is the one colour `source` is in,
+ * when it is in only one: it is softened much faster.
  */
-export function blurred(source: HTMLCanvasElement, sigma: number) {
+export function blurred(source: HTMLCanvasElement, sigma: number, tint?: Tint) {
   const { width, height } = source;
   const out = canvasOf(width, height);
   const o = out.getContext("2d");
@@ -208,7 +246,7 @@ export function blurred(source: HTMLCanvasElement, sigma: number) {
   if (!o || !s) return out;
   s.imageSmoothingQuality = "high";
   s.drawImage(source, 0, 0, small.w, small.h);
-  soften(s, small.sigma);
+  soften(s, small.sigma, tint);
   o.imageSmoothingQuality = "high";
   o.drawImage(canvas, 0, 0, width, height);
   return out;
@@ -240,17 +278,4 @@ export function paintSoft(
   target.imageSmoothingQuality = "high";
   target.drawImage(canvas, 0, 0, width, height);
   target.restore();
-}
-
-/** A repeating `tile` softened by `sigma` pixels, blurred across its edges so it still repeats. */
-export function blurredTile(tile: HTMLCanvasElement, sigma: number) {
-  const { width, height } = tile;
-  const around = canvasOf(width * 3, height * 3);
-  const a = around.getContext("2d");
-  const out = canvasOf(width, height);
-  const o = out.getContext("2d");
-  if (!a || !o) return tile;
-  for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) a.drawImage(tile, x * width, y * height);
-  o.drawImage(blurred(around, sigma), width, height, width, height, 0, 0, width, height);
-  return out;
 }

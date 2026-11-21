@@ -28,7 +28,6 @@ import {
   SCROLL,
   TRAVELLER,
   CANE,
-  travellerPart,
   clampToPath,
   pathData,
   pointAt,
@@ -47,6 +46,9 @@ import {
 } from "@/pages/radio/lib/ink-tone.ts";
 import { Seal } from "@/pages/radio/ui/Seal.tsx";
 import painting from "./ink/monastery-path.webp";
+import travellerBody from "./ink/traveller-body.webp";
+import travellerCane from "./ink/traveller-cane.webp";
+import travellerHole from "./ink/traveller-hole.webp";
 
 /** How wide the painting is, in screen widths: close enough to walk in, far enough to see where. */
 const SCREENS_ACROSS = 2.3;
@@ -233,82 +235,6 @@ interface Motion {
   facesRight: boolean;
 }
 
-interface TravellerCutout {
-  width: number;
-  height: number;
-  body: ImageData;
-  cane: ImageData;
-  /** A mask of where he stood, to take him out of the painting once he walks off. */
-  hole: string;
-}
-
-let travellerCutout: Promise<TravellerCutout | null> | null = null;
-
-/**
- * The old man cut from the painting, body and cane apart, worked out once: going over every
- * pixel of him takes long enough to stall the path's opening.
- */
-function cutTraveller() {
-  travellerCutout ??= (async () => {
-    const image = new Image();
-    image.src = painting;
-    await image.decode();
-    const ratio = image.naturalWidth / SCROLL.width;
-    const width = Math.round(TRAVELLER.width * ratio);
-    const height = Math.round(TRAVELLER.height * ratio);
-    const source = document.createElement("canvas");
-    Object.assign(source, { width, height });
-    const reader = source.getContext("2d", { willReadFrequently: true });
-    if (!reader) return null;
-    reader.drawImage(
-      image,
-      TRAVELLER.left * ratio,
-      TRAVELLER.top * ratio,
-      width,
-      height,
-      0,
-      0,
-      width,
-      height
-    );
-    const ink = reader.getImageData(0, 0, width, height);
-    const parts = { body: new ImageData(width, height), cane: new ImageData(width, height) };
-    const covered = new ImageData(width, height);
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const i = (y * width + x) * 4;
-        const part = travellerPart(
-          TRAVELLER.left + x / ratio,
-          TRAVELLER.top + y / ratio,
-          ink.data[i + 3]
-        );
-        if (!part) continue;
-        parts[part].data.set(ink.data.subarray(i, i + 4), i);
-        // Paper over the stroke and a pixel round it, fully, so no ghost of him stays.
-        for (const [ox, oy] of [
-          [0, 0],
-          [1, 0],
-          [-1, 0],
-          [0, 1],
-          [0, -1],
-        ]) {
-          const [cx, cy] = [x + ox, y + oy];
-          if (cx >= 0 && cy >= 0 && cx < width && cy < height)
-            covered.data[(cy * width + cx) * 4 + 3] = 255;
-        }
-      }
-    }
-    const holeCanvas = document.createElement("canvas");
-    Object.assign(holeCanvas, { width, height });
-    holeCanvas.getContext("2d")?.putImageData(covered, 0, 0);
-    return { width, height, ...parts, hole: holeCanvas.toDataURL() };
-  })().catch(() => {
-    travellerCutout = null;
-    return null;
-  });
-  return travellerCutout;
-}
-
 /**
  * The recordings along a path up Chen Chun's hanging scroll, newest just above the bridge and
  * each older one further up toward the peak. The man on the bridge walks to whichever one plays, and
@@ -352,12 +278,10 @@ export function MountainPath(props: {
   let viewport: HTMLDivElement | undefined;
   let world: HTMLDivElement | undefined;
   let traveller: HTMLDivElement | undefined;
-  let body: HTMLCanvasElement | undefined;
-  let cane: HTMLCanvasElement | undefined;
+  let cane: HTMLImageElement | undefined;
   let glow: HTMLDivElement | undefined;
   const slipFirelights = new Map<string, HTMLElement>();
   let paintingImage: HTMLImageElement | undefined;
-  const [hole, setHole] = createSignal<string | null>(null);
   let sky: HTMLCanvasElement | undefined;
   let walked: SVGPathElement | undefined;
   let ahead: SVGPathElement | undefined;
@@ -688,30 +612,6 @@ export function MountainPath(props: {
     setTimeout(() => phase(tape.id, null), MEND_MS);
   };
 
-  // The old man is cut from the painting itself, body and cane apart so the cane can swing,
-  // and once he walks off, his strokes on the bridge are masked out of it, so the paper
-  // behind shows there as it does everywhere else, lit or not.
-  onSettled(() => {
-    let cancelled = false;
-    void cutTraveller()
-      .then((cutout) => {
-        if (!cutout || cancelled || !body || !cane) return;
-        const { width, height } = cutout;
-        for (const [canvas, pixels] of [
-          [body, cutout.body],
-          [cane, cutout.cane],
-        ] as const) {
-          Object.assign(canvas, { width, height });
-          canvas.getContext("2d")?.putImageData(pixels, 0, 0);
-        }
-        setHole(cutout.hole);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  });
-
   const k = scale;
   const px = (length: number) => `${length}px`;
   return (
@@ -816,9 +716,7 @@ export function MountainPath(props: {
             draggable="false"
             class="absolute inset-0 size-full data-[away=true]:[mask:var(--hole)]"
             style={{
-              "--hole": hole()
-                ? `url(${hole()}) ${TRAVELLER.left * k()}px ${TRAVELLER.top * k()}px / ${TRAVELLER.width * k()}px ${TRAVELLER.height * k()}px no-repeat exclude, linear-gradient(#000, #000)`
-                : undefined,
+              "--hole": `url(${travellerHole}) ${TRAVELLER.left * k()}px ${TRAVELLER.top * k()}px / ${TRAVELLER.width * k()}px ${TRAVELLER.height * k()}px no-repeat exclude, linear-gradient(#000, #000)`,
             }}
           />
           <canvas
@@ -877,8 +775,10 @@ export function MountainPath(props: {
             }}
           >
             {/* The paper he stands on, at night lit by his own glow. */}
-            <canvas
-              ref={(element) => (body = element)}
+            <img
+              src={travellerBody}
+              alt=""
+              draggable="false"
               class="absolute inset-0 size-full"
               style={{
                 background: nightAtom()
@@ -886,8 +786,11 @@ export function MountainPath(props: {
                   : "radial-gradient(closest-side, var(--paper) 65%, transparent)",
               }}
             />
-            <canvas
+            <img
               ref={(element) => (cane = element)}
+              src={travellerCane}
+              alt=""
+              draggable="false"
               class="absolute inset-0 size-full"
               style={{
                 "transform-origin": `${((CANE.hand[0] - TRAVELLER.left) / TRAVELLER.width) * 100}% ${((CANE.hand[1] - TRAVELLER.top) / TRAVELLER.height) * 100}%`,

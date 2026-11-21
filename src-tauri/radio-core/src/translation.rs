@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, ensure};
-use sentencepiece::SentencePieceProcessor;
+use kitoken::Kitoken;
 use tract_onnx::prelude::*;
 
 use crate::error::{Error, Result};
@@ -38,9 +38,10 @@ const WORD_START: char = '▁';
 /// Xenova, downloaded by `models`. Translates Chinese in either script
 /// to English, greedily, on the GPU or every CPU core.
 pub struct Translator {
-    tokenizer: SentencePieceProcessor,
-    /// Both languages share one vocabulary, numbered by `vocab.json`.
-    ids: HashMap<String, i64>,
+    tokenizer: Kitoken,
+    /// The vocabulary's number for each of the tokenizer's pieces: both languages
+    /// share one vocabulary, numbered by `vocab.json`.
+    ids: HashMap<u32, i64>,
     pieces: Vec<String>,
     unknown: i64,
     encoder: Graph,
@@ -91,8 +92,19 @@ impl Translator {
                 .chain(past.iter().map(String::as_str))
                 .map(|name| (name, None))
                 .collect();
+        let tokenizer = Kitoken::from_sentencepiece_file(dir.join(SOURCE_TOKENIZER))?;
+        let ids = tokenizer
+            .to_definition()
+            .model
+            .vocab()
+            .iter()
+            .filter_map(|piece| {
+                let id = ids.get(str::from_utf8(&piece.bytes).ok()?)?;
+                Some((piece.id, *id))
+            })
+            .collect();
         Ok(Self {
-            tokenizer: SentencePieceProcessor::open(dir.join(SOURCE_TOKENIZER))?,
+            tokenizer,
             ids,
             pieces,
             unknown,
@@ -128,9 +140,9 @@ impl Translator {
     fn generate(&self, text: &str) -> TractResult<Vec<i64>> {
         let mut source: Vec<i64> = self
             .tokenizer
-            .encode(text)?
+            .encode(spaced(text), false)?
             .into_iter()
-            .map(|piece| self.ids.get(&piece.piece).copied().unwrap_or(self.unknown))
+            .map(|piece| self.ids.get(&piece).copied().unwrap_or(self.unknown))
             .collect();
         if source.is_empty() {
             return Ok(Vec::new());
@@ -185,6 +197,13 @@ impl Translator {
             .collect();
         text.replace(WORD_START, " ").trim().to_owned()
     }
+}
+
+/// `text` with every tab and line break a space, as SentencePiece reads them.
+fn spaced(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .collect()
 }
 
 fn token(id: i64) -> TractResult<TValue> {

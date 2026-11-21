@@ -80,7 +80,6 @@ run = """
 set -e
 [ "$(uname)" = Darwin ] || { echo "Tauri builds macOS apps only on a Mac." >&2; exit 1; }
 xcode-select -p > /dev/null 2>&1 || { echo "Install the Xcode Command Line Tools: xcode-select --install" >&2; exit 1; }
-command -v cmake > /dev/null || { echo "Install CMake (brew install cmake): SentencePiece builds with it." >&2; exit 1; }
 pnpm tauri build --bundles app,dmg --config src-tauri/tauri.build.conf.json
 """
 
@@ -117,8 +116,6 @@ tools = { java = "temurin-21.0.13+9.0.LTS", android-sdk = "20.0", rust = { versi
 run = """
 # Tauri finds the NDK through NDK_HOME.
 export NDK_HOME="$ANDROID_HOME/ndk/{{vars.ndk}}"
-# CMake (SentencePiece) finds the NDK by this name.
-export ANDROID_NDK_ROOT="$NDK_HOME"
 pnpm tauri android build --apk --target aarch64 --config src-tauri/tauri.build.conf.json
 """
 

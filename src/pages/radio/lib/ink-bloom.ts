@@ -62,22 +62,30 @@ export function soaked(
 export function bloomer(bloom: Bloom) {
   const mask = document.createElement("canvas");
   const rim = document.createElement("canvas");
+  let pixels: { mask: ImageData; rim: ImageData } | null = null;
   return (ctx: CanvasRenderingContext2D, incoming: HTMLCanvasElement, progress: number) => {
     const { width, height } = ctx.canvas;
     const [across, down] = cellsOf(width, height);
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    for (const canvas of [mask, rim]) Object.assign(canvas, { width: across, height: down });
     const maskCtx = mask.getContext("2d");
     const rimCtx = rim.getContext("2d");
-    if (!maskCtx || !rimCtx) return ctx.restore();
+    if (!maskCtx || !rimCtx) return;
+    if (pixels?.mask.width !== across || pixels.mask.height !== down) {
+      for (const canvas of [mask, rim]) Object.assign(canvas, { width: across, height: down });
+      pixels = {
+        mask: maskCtx.createImageData(across, down),
+        rim: rimCtx.createImageData(across, down),
+      };
+      for (let i = 0; i < across * down; i++) pixels.rim.data.set(INK, i * 4);
+    }
+    const { mask: maskPixels, rim: rimPixels } = pixels;
     const cells = soaked(bloom, progress, across, down);
-    const maskPixels = maskCtx.createImageData(across, down);
-    const rimPixels = rimCtx.createImageData(across, down);
-    cells.forEach((a, i) => {
+    for (let i = 0; i < cells.length; i++) {
+      const a = cells[i];
       maskPixels.data[i * 4 + 3] = a * 255;
-      rimPixels.data.set([...INK, a * (1 - a) * 4 * RIM * 255], i * 4);
-    });
+      rimPixels.data[i * 4 + 3] = a * (1 - a) * 4 * RIM * 255;
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     maskCtx.putImageData(maskPixels, 0, 0);
     rimCtx.putImageData(rimPixels, 0, 0);
     // The mask drawn up in place of what the canvas held, then the new place kept to it.
