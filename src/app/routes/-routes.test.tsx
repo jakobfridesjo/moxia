@@ -65,6 +65,7 @@ describe("subtitles", () => {
       {
         kind: "subtitle",
         text: "各位听众早上好",
+        ahead: 0,
         duration: 2,
         said: [0, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8],
         readings: [],

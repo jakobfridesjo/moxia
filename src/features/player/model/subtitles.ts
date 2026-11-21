@@ -21,7 +21,7 @@ export type SubtitlesStatus = "off" | "loading" | "on";
 
 export const subtitlesStatusAtom = createAtom<SubtitlesStatus>("off");
 
-/** A subtitle as it started playing. */
+/** A subtitle, shown a little before it is said. */
 export interface Caption {
   text: string;
   /** How long it takes to say, in seconds. */
@@ -35,7 +35,8 @@ export interface Caption {
   emotionSure: number;
   /** A laugh, applause, crying or a cough heard with the words. */
   burst: Burst | null;
-  /** When it arrived, as a `performance.now()`. */
+  /** When it arrived, and when it starts being said, each as a `performance.now()`. */
+  shown: number;
   at: number;
 }
 

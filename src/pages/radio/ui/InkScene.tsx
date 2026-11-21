@@ -11,7 +11,14 @@ import {
   subtitlesStatusAtom,
   type Caption,
 } from "@/features/player/model/subtitles.ts";
-import { inkIn, inkLeft, layOut, type Layout } from "@/pages/radio/lib/captions.ts";
+import {
+  inkLeft,
+  layOut,
+  type Layout,
+  shownBy,
+  shownFrom,
+  sungBy,
+} from "@/pages/radio/lib/captions.ts";
 import {
   CAPTION_LINE,
   captionWriter,
@@ -556,12 +563,14 @@ export function InkScene(props: InkSceneProps) {
           right: (room.right * ratio) / unit,
           bottom: LEAF_HEIGHT * CAPTION_END,
         };
+        const shows = captions.map((caption, index) => shownFrom(caption, captions[index - 1]));
         const said = captions
           .map((caption, index) => ({
             caption,
-            alpha: inkLeft(caption, now, captions[index + 1]?.at ?? null),
+            from: shows[index] ?? caption.at,
+            alpha: inkLeft(caption, now, shows[index + 1] ?? null),
           }))
-          .filter(({ alpha }) => alpha > 0);
+          .filter(({ from, alpha }) => now >= from && alpha > 0);
         // The subtitles' canvas is touched only while there are subtitles, and once more to clear it.
         if (written && (said.length > 0 || captionsShown)) {
           const page = written.canvas;
@@ -570,12 +579,13 @@ export function InkScene(props: InkSceneProps) {
           written.setTransform(1, 0, 0, 1, 0, 0);
           written.clearRect(0, 0, page.width, page.height);
           const key = `${Object.values(captionBox).join()}:${unit}:${tone.paper}:${tone.writing}:${fontsLoaded}`;
-          for (const { caption, alpha } of said) {
+          for (const { caption, from, alpha } of said) {
             const layout = layoutOf(caption);
-            const inks = still ? layout.cells.map(() => 1) : inkIn(caption, layout, now);
+            const sung = still ? layout.cells.map(() => 1) : sungBy(caption, layout, now);
             writerOf(caption, key, () => captionWriter(layout, captionBox, tone, unit))(
               written,
-              inks,
+              sung,
+              still ? 1 : shownBy(from, now),
               alpha
             );
           }

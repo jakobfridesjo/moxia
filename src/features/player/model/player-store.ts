@@ -169,7 +169,8 @@ function listen(play: number) {
       return;
     }
     if (event.kind === "subtitle") {
-      addCaption({ ...event, at: performance.now() });
+      const shown = performance.now();
+      addCaption({ ...event, shown, at: shown + event.ahead * 1000 });
       return;
     }
     if (event.kind === "sound") {

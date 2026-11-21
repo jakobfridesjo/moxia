@@ -6,6 +6,8 @@ All tasks are mise tasks, run from the repo root. `mise tasks` lists them.
 
 The Rust side needs the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) plus the ALSA headers for sound output on Linux.
 
+On x86_64 Linux, mise installs the [mold](https://github.com/rui314/mold) linker and sets `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS` so that Rust builds started through mise (`mise exec`, the tasks or an activated shell) link with it. A plain `cargo` started outside mise uses the system linker. Android and macOS builds keep their own linkers.
+
 **Fedora**
 
 ```bash

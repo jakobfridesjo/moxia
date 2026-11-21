@@ -21,6 +21,7 @@ function line(text: string, emotion: Emotion, emotionSure = 0.9, at = 0): Captio
     duration: said.length * 0.25,
     said,
     readings: [],
+    shown: at,
     at,
     emotion,
     emotionSure,

@@ -149,6 +149,35 @@ url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0
 checksum = "sha256:a4dbaa05fca4bd89d84584e58c459bd732efebb1722af80ab13c6516832004f9"
 url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_x64_windows_hotspot_21.0.13_9.zip"
 
+[[tools.mold]]
+version = "3.0.0"
+backend = "aqua:rui314/mold"
+specifiers = ["3.0.0"]
+
+[tools.mold."platforms.linux-arm64"]
+checksum = "sha256:52c759d3689babaea4c42af2f31062a74ab83e17ffb5a8090232534c67b70577"
+checksum_source = "mise-versions"
+url = "https://github.com/rui314/mold/releases/download/v3.0.0/mold-3.0.0-aarch64-linux.tar.gz"
+url_api = "https://api.github.com/repos/rui314/mold/releases/assets/612121952"
+
+[tools.mold."platforms.linux-arm64-musl"]
+checksum = "sha256:52c759d3689babaea4c42af2f31062a74ab83e17ffb5a8090232534c67b70577"
+checksum_source = "mise-versions"
+url = "https://github.com/rui314/mold/releases/download/v3.0.0/mold-3.0.0-aarch64-linux.tar.gz"
+url_api = "https://api.github.com/repos/rui314/mold/releases/assets/612121952"
+
+[tools.mold."platforms.linux-x64"]
+checksum = "sha256:6c90d4a474c7c0409dfb575be03a5345878ac14fdba18de8b40fa58c60121189"
+checksum_source = "mise-versions"
+url = "https://github.com/rui314/mold/releases/download/v3.0.0/mold-3.0.0-x86_64-linux.tar.gz"
+url_api = "https://api.github.com/repos/rui314/mold/releases/assets/612122001"
+
+[tools.mold."platforms.linux-x64-musl"]
+checksum = "sha256:6c90d4a474c7c0409dfb575be03a5345878ac14fdba18de8b40fa58c60121189"
+checksum_source = "mise-versions"
+url = "https://github.com/rui314/mold/releases/download/v3.0.0/mold-3.0.0-x86_64-linux.tar.gz"
+url_api = "https://api.github.com/repos/rui314/mold/releases/assets/612122001"
+
 [[tools.node]]
 version = "26.13.0"
 backend = "core:node"

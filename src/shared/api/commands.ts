@@ -54,14 +54,16 @@ export type PlayerEvent =
   /** How loud each channel peaked lately, from 0 to 1; about 20 times a second while playing. */
   | { kind: "level"; left: number; right: number }
   /**
-   * What is said from now on, as it plays, while subtitles are on. `duration` is how long it takes to say, and `said`
-   * when each of its characters is said, in seconds from now. `emotion` is how the voice
+   * What is about to be said, a little before it plays, while subtitles are on. `ahead` is how long until it starts
+   * being said, `duration` how long it takes to say, and `said` when each of its characters is said, in seconds from
+   * when it starts. `emotion` is how the voice
    * sounds, `emotionSure` how sure the model is of it (0 to 1), and `burst` a laugh,
    * applause, crying or a cough heard with the words.
    */
   | {
       kind: "subtitle";
       text: string;
+      ahead: number;
       duration: number;
       said: number[];
       /** How each character of `text` is read, in pinyin or zhuyin; "" for one not read. */

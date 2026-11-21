@@ -1,8 +1,9 @@
 /*
  * Subtitles written into the painting: Chinese a character to a cell, anything
- * else a word to a cell, which the painter wraps into lines. Each cell fades in
- * as it is said; the caption stays a while, then fades, faster once the next
- * thing is said.
+ * else a word to a cell, which the painter wraps into lines. A caption shows
+ * pale a little before it is said, and full ink sweeps across each cell as it
+ * is said, as in karaoke; it stays a while, then fades, faster once the next
+ * is shown.
  */
 
 import type { Caption } from "@/features/player/model/subtitles.ts";
@@ -10,10 +11,12 @@ import type { Caption } from "@/features/player/model/subtitles.ts";
 /** How long a caption stays once all of it is written, and how long it takes to fade, in ms. */
 const HOLD_MS = 3500;
 const FADE_MS = 1500;
-/** How fast one fades once the next thing is said. */
+/** How fast one fades once the next is shown. */
 const GIVE_WAY_MS = 500;
-/** How long each character takes to fade in once it is said, in ms. */
-const INK_IN_MS = 400;
+/** How long a caption takes to appear, in ms. */
+const SHOW_MS = 300;
+/** The shortest and longest the ink takes to sweep across one cell, in seconds: a pause after it is not part of it. */
+const SWEEP = { least: 0.08, most: 0.6 } as const;
 
 /** A piece the painter wraps into lines: a Chinese character, or a word of anything else; `from` is which of the text's characters it starts with. */
 interface Cell {
@@ -57,15 +60,29 @@ export function layOut(text: string, readings: readonly string[] = []): Layout {
   return { chinese: false, cells };
 }
 
-/** How much ink each of `layout`'s cells has taken at `now`, from 0 to 1: each fades in as its first character is said. */
-export function inkIn(caption: Caption, layout: Layout, now: number) {
-  return layout.cells.map((cell) => {
-    const said = caption.at + (caption.said[cell.from] ?? 0) * 1000;
-    return Math.min(1, Math.max(0, (now - said) / INK_IN_MS));
+/** When `caption` shows, as a `performance.now()`: as it arrives, ahead of being said, but not while `previous` is still being said. */
+export function shownFrom(caption: Caption, previous: Caption | undefined) {
+  const free = previous ? previous.at + previous.duration * 1000 : caption.shown;
+  return Math.min(caption.at, Math.max(caption.shown, free));
+}
+
+/** How far `caption` has appeared at `now`, from 0 to 1, showing from `from`. */
+export function shownBy(from: number, now: number) {
+  return Math.min(1, Math.max(0, (now - from) / SHOW_MS));
+}
+
+/** How far across each of `layout`'s cells the ink has swept at `now`, from 0 to 1: from when its first character is said until the next cell's is. */
+export function sungBy(caption: Caption, layout: Layout, now: number) {
+  const starts = layout.cells.map((cell) => caption.said[cell.from] ?? 0);
+  const elapsed = (now - caption.at) / 1000;
+  return starts.map((start, index) => {
+    const next = starts[index + 1] ?? caption.duration;
+    const sweep = Math.min(SWEEP.most, Math.max(SWEEP.least, next - start));
+    return Math.min(1, Math.max(0, (elapsed - start) / sweep));
   });
 }
 
-/** How much ink `caption` keeps at `now`, from 1 to 0; `next` is when the next thing was said. */
+/** How much ink `caption` keeps at `now`, from 1 to 0; `next` is when the next one shows. */
 export function inkLeft(caption: Caption, now: number, next: number | null) {
   const written = caption.at + caption.duration * 1000;
   const fading = Math.max(0, now - written - HOLD_MS) / FADE_MS;

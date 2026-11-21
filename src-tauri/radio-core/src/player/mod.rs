@@ -53,6 +53,8 @@ const SUBTITLED_START_CHUNKS: usize = 6 * CHUNKS_PER_SECOND;
 const SUBTITLER_QUEUE: usize = 30 * CHUNKS_PER_SECOND;
 /// A subtitle that comes late still shows for at least this long, in seconds.
 const MIN_SUBTITLE_SECONDS: f64 = 1.0;
+/// How long before its speech plays a subtitle is released, so the line can be read ahead.
+const SUBTITLE_LEAD_SECONDS: f64 = 0.5;
 /// Audio, in chunks, decoded ahead at most.
 const MAX_CHUNKS: usize = 10 * CHUNKS_PER_SECOND;
 /// How long to wait before each try at reaching a station that dropped, in
@@ -75,12 +77,14 @@ pub enum PlayerEvent {
         left: f32,
         right: f32,
     },
-    /// What is said from now on, as the output plays it.
+    /// What is about to be said, a little before the output plays it.
     Subtitle {
         text: String,
+        /// How long until it starts being said, in seconds.
+        ahead: f32,
         /// How long it takes to say, in seconds.
         duration: f32,
-        /// When each character of `text` is said, in seconds from now.
+        /// When each character of `text` is said, in seconds from when it starts.
         said: Vec<f32>,
         /// How each character of `text` is read, in pinyin or zhuyin; empty when not.
         readings: Vec<String>,
@@ -672,7 +676,7 @@ impl Read for Taped {
 }
 
 /// What has started playing by `played` seconds, taken off `due`: the
-/// latest change in what plays, then subtitles whose speech has started.
+/// latest change in what plays, then subtitles whose speech is about to start.
 fn release(due: &mut Due, played: f64) -> Vec<PlayerEvent> {
     let mut released = Vec::new();
     let mut sound = None;
@@ -687,19 +691,21 @@ fn release(due: &mut Due, played: f64) -> Vec<PlayerEvent> {
     while due
         .subtitles
         .front()
-        .is_some_and(|subtitle| subtitle.start <= played)
+        .is_some_and(|subtitle| subtitle.start - SUBTITLE_LEAD_SECONDS <= played)
     {
         let Some(subtitle) = due.subtitles.pop_front() else {
             break;
         };
-        let left = (subtitle.end - played.max(subtitle.start)).max(MIN_SUBTITLE_SECONDS);
+        let starts = played.max(subtitle.start);
+        let left = (subtitle.end - starts).max(MIN_SUBTITLE_SECONDS);
         released.push(PlayerEvent::Subtitle {
             text: subtitle.text,
+            ahead: (starts - played) as f32,
             duration: left as f32,
             said: subtitle
                 .said
                 .iter()
-                .map(|at| (at - played).max(0.0) as f32)
+                .map(|at| (at - starts).max(0.0) as f32)
                 .collect(),
             readings: subtitle.readings,
             emotion: subtitle.emotion,
@@ -896,6 +902,7 @@ mod tests {
         assert_eq!(
             json(PlayerEvent::Subtitle {
                 text: "早晨".to_owned(),
+                ahead: 0.5,
                 duration: 2.5,
                 said: vec![0.0, 1.5],
                 readings: vec!["zǎo".to_owned(), "chen".to_owned()],
@@ -904,7 +911,8 @@ mod tests {
                 burst: Some(Burst::Laughter),
             }),
             serde_json::json!({
-                "kind": "subtitle", "text": "早晨", "duration": 2.5, "said": [0.0, 1.5],
+                "kind": "subtitle", "text": "早晨", "ahead": 0.5, "duration": 2.5,
+                "said": [0.0, 1.5],
                 "readings": ["zǎo", "chen"],
                 "emotion": "happy", "emotionSure": 0.5, "burst": "laughter"
             })
@@ -952,11 +960,12 @@ mod tests {
         }
     }
 
-    fn said(text: &str, duration: f32) -> PlayerEvent {
+    fn said(text: &str, ahead: f32, duration: f32, said: f32) -> PlayerEvent {
         PlayerEvent::Subtitle {
             text: text.to_owned(),
+            ahead,
             duration,
-            said: vec![0.0],
+            said: vec![said],
             readings: Vec::new(),
             emotion: Emotion::Neutral,
             emotion_sure: 0.9,
@@ -965,15 +974,15 @@ mod tests {
     }
 
     #[test]
-    fn releases_subtitles_as_their_speech_plays() {
+    fn releases_subtitles_a_little_before_their_speech_plays() {
         let mut due = Due {
             subtitles: VecDeque::from([subtitle(1.0, 3.0, "早"), subtitle(4.0, 9.0, "晚")]),
             ..Due::default()
         };
-        assert!(release(&mut due, 0.9).is_empty());
-        assert_eq!(release(&mut due, 1.5), [said("早", 1.5)]);
+        assert!(release(&mut due, 0.4).is_empty());
+        assert_eq!(release(&mut due, 0.75), [said("早", 0.25, 2.0, 0.5)]);
         // One that is late shows for what is left of its speech, or a second at least.
-        assert_eq!(release(&mut due, 8.5), [said("晚", 1.0)]);
+        assert_eq!(release(&mut due, 8.5), [said("晚", 0.0, 1.0, 0.0)]);
         assert!(due.subtitles.is_empty());
     }
 

@@ -11,9 +11,13 @@ rust = { version = "1.99.1", components = "rustfmt,clippy" }
 hk = "2.11.1"
 pkl = "0.33.0"
 "github:EmbarkStudios/cargo-about" = "0.9.3"
+# mold ships no macOS build; Linux builds link with it (see [env]).
+mold = { version = "3.0.0", os = ["linux"] }
 
 [env]
 HK_MISE = 1
+# Link native Linux builds with mold. Android and macOS keep their own linkers.
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
 
 # The Android tasks bring their own tools, installed on first run: Gradle needs a
 # JDK, Tauri the SDK and the NDK (`mise android:sdk` installs this version).

@@ -80,6 +80,7 @@ it("measures the radio as it is used", { timeout: 180_000 }, async () => {
     sendToChannel(playing(), {
       kind: "subtitle",
       text: SAID,
+      ahead: 0.5,
       duration: 2.4,
       said: Array.from({ length: SAID.length }, (_, index) => index * 0.2),
       emotion: tick % 3 ? "neutral" : "happy",

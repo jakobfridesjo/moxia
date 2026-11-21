@@ -918,28 +918,33 @@ interface Halo {
   at: [number, number];
 }
 
-/** One page of a caption: its glyphs written once at full ink, and the halos of the cells written so far. */
+/** How much ink a cell has before it is said, against its full ink. */
+const CAPTION_UNSUNG = 0.4;
+
+/** One page of a caption: its glyphs written once at full ink, and the halos of its cells. */
 interface Page {
   glyphs: HTMLCanvasElement;
-  /** The halos of the cells that have taken all their ink, laid down for good. */
+  /** The halos of the cells, laid down for good once the page has appeared. */
   dried: CanvasRenderingContext2D;
   dry: Set<number>;
-  /** The halos of the cells still taking ink. */
+  /** The halos of the cells while the page appears. */
   wet: Map<number, Halo>;
   /** The page's top-left corner on the screen, in pixels. */
   at: [number, number];
   /** Each cell's part of the glyphs, in screen pixels, tiling the page without overlap. */
   cells: Map<number, Rect>;
+  /** Where the ink sweeps across each cell, from and to, in screen pixels. */
+  sweeps: Map<number, [number, number]>;
   /** Where each cell's glyph is written, in units. */
   spots: Map<number, [number, number]>;
 }
 
 /**
  * A subtitle written in `box` (in units `unit` pixels each): from its top-left corner, line after
- * line down it, starting again at the top once the box is full, each cell of `layout` with as
- * much ink as `inks` gives it, haloed in paper so the painting never runs through them, in
+ * line down it, starting again at the top once the box is full, pale until full ink sweeps across
+ * each cell of `layout` as it is said, haloed in paper so the painting never runs through them, in
  * `tone`'s writing. Each page's glyphs are written once and copied cell by cell; each cell's halo
- * is drawn once, whole, fades in with its cell and is then laid down with the others.
+ * is drawn once, whole, appears with the page and is then laid down with the others.
  */
 export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: number) {
   measurer ??= document.createElement("canvas").getContext("2d");
@@ -1009,6 +1014,7 @@ export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: num
     if (!ctx || !dried) return null;
     const spots = new Map<number, [number, number]>();
     const cells = new Map<number, Rect>();
+    const sweeps = new Map<number, [number, number]>();
     shown.forEach((line, number) => {
       let along = 0;
       const y0 = top + number * row - (number === 0 ? bleed : 0);
@@ -1021,6 +1027,7 @@ export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: num
         const x1 = place === line.length - 1 ? right + bleed : left + along + advance;
         const pixels = [x0 * unit, y0 * unit, x1 * unit, y1 * unit].map(Math.round);
         cells.set(index, [pixels[0], pixels[1], pixels[2] - pixels[0], pixels[3] - pixels[1]]);
+        sweeps.set(index, [(left + along) * unit, (left + along + advance) * unit]);
         along += advance;
       });
     });
@@ -1032,14 +1039,15 @@ export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: num
       ctx.fillText(cell.glyph, ...spot);
       if (cell.reading) writeReading(ctx, cell.reading, [spot[0] + size / 2, spot[1]], size, false);
     }
-    return { glyphs, dried, dry: new Set(), wet: new Map(), at, cells, spots };
+    return { glyphs, dried, dry: new Set(), wet: new Map(), at, cells, sweeps, spots };
   };
 
-  /** Draws the page being written onto `ctx` (which draws in pixels), each cell as inked as `inks` says, all at `alpha`. */
-  return (ctx: Context, inks: readonly number[], alpha: number) => {
-    // Only the lines from the last time the box was started again show: the one being written in.
-    const writing = lines.findLastIndex((line) => line.some((index) => (inks[index] ?? 0) > 0));
-    const first = Math.floor(Math.max(0, writing) / fit) * fit;
+  /** Draws the page being said onto `ctx` (which draws in pixels), `shown` of the way to appearing, the ink as far across each cell as `sung` says, all at `alpha`. */
+  return (ctx: Context, sung: readonly number[], shown: number, alpha: number) => {
+    if (shown <= 0) return;
+    // Only the lines from the last time the box was started again show: the one being said.
+    const saying = lines.findLastIndex((line) => line.some((index) => (sung[index] ?? 0) > 0));
+    const first = Math.floor(Math.max(0, saying) / fit) * fit;
     let page = pages.get(first);
     if (page === undefined) {
       const written = write(first);
@@ -1047,19 +1055,16 @@ export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: num
       page = written;
       pages.set(first, page);
     }
-    const { glyphs, dried, dry, wet, at, cells, spots } = page;
-    for (const index of dry) {
-      if ((inks[index] ?? 0) >= 1) continue;
+    const { glyphs, dried, dry, wet, at, cells, sweeps, spots } = page;
+    if (shown < 1 && dry.size > 0) {
       dried.clearRect(0, 0, dried.canvas.width, dried.canvas.height);
       dry.clear();
-      break;
     }
     for (const [index, spot] of spots) {
-      const ink = inks[index] ?? 0;
-      if (ink <= 0 || dry.has(index)) continue;
+      if (dry.has(index)) continue;
       const halo = wet.get(index) ?? haloOf(index, spot);
       if (!halo) continue;
-      if (ink < 1) {
+      if (shown < 1) {
         wet.set(index, halo);
         continue;
       }
@@ -1068,20 +1073,29 @@ export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: num
       dry.add(index);
     }
     ctx.save();
-    // Every halo lies under every glyph, so a new cell's wash never dulls the writing beside it.
+    // Every halo lies under every glyph, so no cell's wash dulls the writing beside it.
     if (dry.size > 0) {
       ctx.globalAlpha = alpha;
       ctx.drawImage(dried.canvas, ...at);
     }
-    for (const [index, halo] of wet) {
-      ctx.globalAlpha = alpha * Math.min(1, Math.max(0, inks[index] ?? 0));
-      ctx.drawImage(halo.canvas, ...halo.at);
-    }
+    const ink = alpha * Math.min(1, shown);
+    ctx.globalAlpha = ink;
+    for (const halo of wet.values()) ctx.drawImage(halo.canvas, ...halo.at);
     for (const [index, [x, y, w, h]] of cells) {
-      const ink = inks[index] ?? 0;
-      if (ink <= 0 || w <= 0 || h <= 0) continue;
-      ctx.globalAlpha = alpha * Math.min(1, ink);
-      ctx.drawImage(glyphs, x - at[0], y - at[1], w, h, x, y, w, h);
+      if (w <= 0 || h <= 0) continue;
+      const swept = sung[index] ?? 0;
+      const [from, to] = sweeps.get(index) ?? [x, x + w];
+      // Whole pixels, so the two parts of a cell neither overlap nor part.
+      const inked = swept >= 1 ? w : swept <= 0 ? 0 : Math.round(from + (to - from) * swept) - x;
+      const edge = Math.min(w, Math.max(0, inked));
+      if (edge > 0) {
+        ctx.globalAlpha = ink;
+        ctx.drawImage(glyphs, x - at[0], y - at[1], edge, h, x, y, edge, h);
+      }
+      if (edge < w) {
+        ctx.globalAlpha = ink * CAPTION_UNSUNG;
+        ctx.drawImage(glyphs, x + edge - at[0], y - at[1], w - edge, h, x + edge, y, w - edge, h);
+      }
     }
     ctx.restore();
   };
