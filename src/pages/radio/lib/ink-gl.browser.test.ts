@@ -5,14 +5,13 @@ import { leafSize, paintScene, type Scene } from "@/pages/radio/lib/ink-painter.
 import { makeNight, NIGHT_LOOK } from "@/pages/radio/lib/ink-night.ts";
 import { makeWeather } from "@/pages/radio/lib/ink-weather.ts";
 import { DAY_TONE } from "@/pages/radio/lib/ink-tone.ts";
-import { bloomer } from "@/pages/radio/lib/ink-bloom.ts";
 import { makeDay } from "@/pages/radio/lib/ink-day.ts";
 import { makeSky, weatherFor, type SkyNow } from "@/pages/radio/lib/ink-sky.ts";
-import { createInkGL, type InkGL } from "@/pages/radio/lib/ink-gl.ts";
+import { createInkGL, type InkGL, type InkLayers } from "@/pages/radio/lib/ink-gl.ts";
 
 /*
- * The GPU draws what the 2D canvas would, so either may run: each is drawn both ways, and
- * the two compared pixel by pixel. They differ only in how mist is resampled and rounded.
+ * The GPU's layers over the painting: what each effect lays on which, and the night's light
+ * matching the 2D canvas's, which lights a painting once when there are no shaders.
  */
 
 const REGIONS: CountryCode[] = ["CN", "TW", "HK", "MO"];
@@ -24,13 +23,16 @@ const [WIDTH, HEIGHT] = [215, 430];
 const made: InkGL[] = [];
 afterEach(() => made.splice(0).forEach((gl) => gl.dispose()));
 
-/** A renderer; with `onGpu`, one that draws as on a real GPU, though the test browser's WebGL runs on the CPU. */
-function renderer(onGpu = false) {
-  const gl = createInkGL(onGpu ? { software: false } : undefined);
+/** A layer the size of the test screen, cleared; the test browser's WebGL runs on the CPU. */
+function renderer() {
+  const gl = createInkGL(undefined, { allowSoftware: true });
   if (!gl) throw new Error("no WebGL2");
   made.push(gl);
+  gl.clear(WIDTH, HEIGHT);
   return gl;
 }
+
+const layersOf = (): InkLayers => ({ under: renderer(), over: renderer() });
 
 /** A leaf of `region`'s size, bare but for a few strokes of solid ink. */
 async function leaf(region: CountryCode) {
@@ -64,12 +66,43 @@ async function sceneOf(region: CountryCode, night: boolean) {
 
 /** What `paint` draws on a clear canvas, in the scene's units. */
 function drawn(scene: Scene, paint: (ctx: CanvasRenderingContext2D) => void) {
+  return composed(scene, paint, []);
+}
+
+/**
+ * What `paint` draws on a clear canvas in the scene's units, with `layers` flushed and laid
+ * over and under it as the browser lays them: the first under, the rest over.
+ */
+function composed(
+  scene: Scene,
+  paint: (ctx: CanvasRenderingContext2D) => void,
+  [under, ...over]: InkGL[]
+) {
+  const canvas = document.createElement("canvas");
+  Object.assign(canvas, { width: WIDTH, height: HEIGHT });
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("no canvas");
+  ctx.setTransform(...scene.transform);
+  paint(ctx);
+  const out = document.createElement("canvas");
+  Object.assign(out, { width: WIDTH, height: HEIGHT });
+  const shown = out.getContext("2d", { willReadFrequently: true });
+  if (!shown) throw new Error("no canvas");
+  for (const gl of [under, ...over]) gl?.flush();
+  if (under) shown.drawImage(under.canvas, 0, 0);
+  shown.drawImage(canvas, 0, 0);
+  for (const gl of over) shown.drawImage(gl.canvas, 0, 0);
+  return shown.getImageData(0, 0, WIDTH, HEIGHT).data;
+}
+
+/** What a layer holds once flushed. */
+function held(gl: InkGL) {
+  gl.flush();
   const canvas = document.createElement("canvas");
   Object.assign(canvas, { width: WIDTH, height: HEIGHT });
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("no canvas");
-  ctx.setTransform(...scene.transform);
-  paint(ctx);
+  ctx.drawImage(gl.canvas, 0, 0);
   return ctx.getImageData(0, 0, WIDTH, HEIGHT).data;
 }
 
@@ -95,60 +128,29 @@ function inked(pixels: Uint8ClampedArray) {
 
 describe("mist on the GPU", () => {
   for (const region of REGIONS)
-    it(`lies over ${region} as the 2D canvas lays it`, async () => {
+    it(`lies over ${region} under the figures, and the veil and gust over them`, async () => {
       const { image, scene } = await sceneOf(region, false);
-      const paint = (gl: InkGL | null) => (ctx: CanvasRenderingContext2D) => {
-        const weather = makeWeather(region, image, leafSize(image), DAY_TONE, gl);
-        weather.draw(ctx, PLAYING, 0, true);
+      const layers = layersOf();
+      const weather = makeWeather(region, image, leafSize(image), DAY_TONE, layers);
+      drawn(scene, (ctx) => weather.draw(ctx, PLAYING, 0, true));
+      expect(inked(held(layers.under))).toBe(true);
+      expect(inked(held(layers.over))).toBe(false);
+
+      drawn(scene, (ctx) => {
         weather.veil(ctx, STOPPED);
         weather.gust(ctx, 0.5, 1);
-        gl?.flush(ctx);
-      };
-      const flat = drawn(scene, paint(null));
-      // On the CPU the canvas is made the size of what is drawn; on a GPU it keeps the screen's.
-      for (const onGpu of [false, true]) {
-        const gpu = drawn(scene, paint(renderer(onGpu)));
-
-        expect(inked(gpu)).toBe(true);
-        const { mean, nearlyWorst } = difference(flat, gpu);
-        expect(mean).toBeLessThan(2.5);
-        expect(nearlyWorst).toBeLessThan(16);
-      }
+      });
+      expect(inked(held(layers.over))).toBe(true);
     });
 
-  it("is the same whether the canvas is made to size or keeps the screen's", async () => {
-    const { image, scene } = await sceneOf("TW", false);
-    const paint = (gl: InkGL) => (ctx: CanvasRenderingContext2D) => {
-      const weather = makeWeather("TW", image, leafSize(image), DAY_TONE, gl);
-      weather.draw(ctx, PLAYING, 0, true);
-      weather.gust(ctx, 0.5, 1);
-      gl.flush(ctx);
-    };
-    const sized = drawn(scene, paint(renderer()));
-    const kept = drawn(scene, paint(renderer(true)));
-
-    const { mean, nearlyWorst } = difference(sized, kept);
-    expect(mean).toBeLessThan(0.1);
-    expect(nearlyWorst).toBeLessThanOrEqual(1);
-  });
-});
-
-describe("without the GPU", () => {
-  it("draws in 2D once the renderer is let go", async () => {
+  it("lays nothing once the renderer is let go", async () => {
     const { image, scene } = await sceneOf("CN", false);
-    const gl = renderer();
-    const weather = makeWeather("CN", image, leafSize(image), DAY_TONE, gl);
-    gl.dispose();
-    const after = drawn(scene, (ctx) => {
-      weather.draw(ctx, PLAYING, 0, true);
-      gl.flush(ctx);
-    });
-    const flat = drawn(scene, (ctx) =>
-      makeWeather("CN", image, leafSize(image), DAY_TONE).draw(ctx, PLAYING, 0, true)
-    );
+    const layers = layersOf();
+    const weather = makeWeather("CN", image, leafSize(image), DAY_TONE, layers);
+    layers.under.dispose();
+    drawn(scene, (ctx) => weather.draw(ctx, PLAYING, 0, true));
 
-    expect(gl.ready).toBe(false);
-    expect(after).toEqual(flat);
+    expect(layers.under.ready).toBe(false);
   });
 });
 
@@ -157,37 +159,41 @@ describe("night on the GPU", () => {
     it(`lights ${region} as the 2D canvas lights it`, async () => {
       const { image, scene } = await sceneOf(region, true);
       const moment = { scene, air: PLAYING, time: 1.3, seconds: 0, still: false };
-      const paint = (gl: InkGL | null) => (ctx: CanvasRenderingContext2D) => {
-        const night = makeNight(region, image, gl);
+      const flat = drawn(scene, (ctx) => {
+        const night = makeNight(region, image);
         night.under(ctx, moment);
-        gl?.flush(ctx);
         night.over(ctx, moment);
-        gl?.flush(ctx);
-      };
-      const flat = drawn(scene, paint(null));
-      for (const onGpu of [false, true]) {
-        const gpu = drawn(scene, paint(renderer(onGpu)));
+      });
+      const layers = layersOf();
+      const night = makeNight(region, image, layers);
+      const gpu = composed(
+        scene,
+        (ctx) => {
+          night.under(ctx, moment);
+          night.over(ctx, moment);
+        },
+        [layers.under, layers.over]
+      );
 
-        expect(inked(gpu)).toBe(true);
-        const { mean, nearlyWorst } = difference(flat, gpu);
-        expect(mean).toBeLessThan(2);
-        expect(nearlyWorst).toBeLessThan(12);
-      }
+      expect(inked(gpu)).toBe(true);
+      const { mean, nearlyWorst } = difference(flat, gpu);
+      expect(mean).toBeLessThan(2);
+      expect(nearlyWorst).toBeLessThan(12);
     });
 
   it("leaves the light behind the ink", async () => {
     const { image, scene } = await sceneOf("CN", true);
-    const gpu = drawn(scene, (ctx) => {
-      const gl = renderer();
-      makeNight("CN", image, gl).under(ctx, {
+    const layers = layersOf();
+    drawn(scene, (ctx) =>
+      makeNight("CN", image, layers).under(ctx, {
         scene,
         air: PLAYING,
         time: 0,
         seconds: 0,
         still: true,
-      });
-      gl.flush(ctx);
-    });
+      })
+    );
+    const gpu = held(layers.under);
     const ink = scene.ink.getContext("2d")?.getImageData(0, 0, WIDTH, HEIGHT).data;
     if (!ink) throw new Error("no ink");
     const inkedPixel = ink.findIndex((value, i) => i % 4 === 3 && value === 255);
@@ -196,36 +202,7 @@ describe("night on the GPU", () => {
   });
 });
 
-describe("the bloom on the GPU", () => {
-  it("soaks the new place in as the 2D canvas does", async () => {
-    const { scene } = await sceneOf("CN", false);
-    const incoming = document.createElement("canvas");
-    Object.assign(incoming, { width: WIDTH, height: HEIGHT });
-    const g = incoming.getContext("2d");
-    if (!g) throw new Error("no canvas");
-    const wash = g.createLinearGradient(0, 0, WIDTH, HEIGHT);
-    wash.addColorStop(0, "rgb(230,220,200)");
-    wash.addColorStop(1, "rgb(40,40,40)");
-    g.fillStyle = wash;
-    g.fillRect(0, 0, WIDTH, HEIGHT);
-    const paint = (gl: InkGL | null) => (ctx: CanvasRenderingContext2D) => {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      bloomer({ origin: [0.3, 0.7], seed: 17 }, gl)(ctx, incoming, 0.45);
-    };
-    const flat = drawn(scene, paint(null));
-    // The test browser's WebGL runs on the CPU, where the bloom would take the 2D path.
-    const gpu = drawn(scene, paint({ ...renderer(), ready: true, software: false }));
-
-    expect(inked(gpu)).toBe(true);
-    const { mean, nearlyWorst } = difference(flat, gpu);
-    expect(mean).toBeLessThan(2);
-    expect(nearlyWorst).toBeLessThan(8);
-  });
-});
-
 describe("the day on the GPU", () => {
-  /** The renderer as a real GPU would report it: the test browser's WebGL runs on the CPU. */
-  const gpu = (): InkGL => ({ ...renderer(), ready: true, software: false });
   /** Each painting's own weather, as it shows while the real one is not known. */
   const skyOf = (region: "CN" | "TW" | "MO" | "HK") => (): SkyNow => ({
     weather: weatherFor(region, null),
@@ -235,45 +212,40 @@ describe("the day on the GPU", () => {
   });
 
   for (const region of ["TW", "MO", "HK"] as const)
-    it(`lays ${region}'s weather and light over the leaf`, async () => {
+    it(`lays ${region}'s weather and light under the figures`, async () => {
       const { scene } = await sceneOf(region, false);
-      const gl = gpu();
-      const day = makeDay(region, gl, skyOf(region));
+      const layers = layersOf();
+      const day = makeDay(region, layers, skyOf(region));
       if (!day) throw new Error(`no day for ${region}`);
-      const pixels = drawn(scene, (ctx) => {
-        day.draw(ctx, { scene, air: PLAYING, still: false });
-        gl.flush(ctx);
-      });
+      drawn(scene, (ctx) => day.draw(ctx, { scene, air: PLAYING, still: false }));
 
-      expect(inked(pixels)).toBe(true);
+      expect(inked(held(layers.under))).toBe(true);
     });
 
-  it("draws only Hong Kong's dust over the figures, and only while it moves", async () => {
+  it("lays only Hong Kong's dust over the figures, and only while it moves", async () => {
     for (const region of ["TW", "MO", "HK"] as const) {
       const { scene } = await sceneOf(region, false);
-      const gl = gpu();
-      const day = makeDay(region, gl, skyOf(region));
-      const over = (still: boolean) =>
-        drawn(scene, (ctx) => {
-          day?.over(ctx, { scene, air: PLAYING, still });
-          gl.flush(ctx);
-        });
+      const layers = layersOf();
+      const day = makeDay(region, layers, skyOf(region));
+      const over = (still: boolean) => {
+        layers.over.clear(WIDTH, HEIGHT);
+        drawn(scene, (ctx) => day?.over(ctx, { scene, air: PLAYING, still }));
+        return held(layers.over);
+      };
       expect(inked(over(false))).toBe(region === "HK");
       expect(inked(over(true))).toBe(false);
     }
   });
 
-  it("is left out where there is no day, or the GPU is the CPU", () => {
-    expect(makeDay("CN", gpu(), skyOf("CN"))).toBeNull();
-    expect(makeDay("HK", renderer(), skyOf("HK"))).toBeNull();
-    expect(makeDay("HK", null, skyOf("HK"))).toBeNull();
+  it("is left out where there is no day", () => {
+    expect(makeDay("CN", layersOf(), skyOf("CN"))).toBeNull();
   });
 
-  it("lays real rain, snow, fog and dusk over any painting, but not on the CPU", async () => {
+  it("lays real rain, snow, fog and dusk over any painting", async () => {
     const { scene } = await sceneOf("CN", false);
     const clear = { rain: 0, snow: 0, cloud: 0, fog: 0, wind: 0, storm: false };
     const skyWith = (sky: Partial<SkyNow>) => {
-      const gl = gpu();
+      const gl = renderer();
       const overhead = makeSky(gl, () => ({
         weather: clear,
         glow: 0,
@@ -281,20 +253,18 @@ describe("the day on the GPU", () => {
         moon: 1,
         ...sky,
       }));
-      return drawn(scene, (ctx) => {
-        overhead?.draw(ctx, { scene, air: PLAYING, still: false });
-        gl.flush(ctx);
-      });
+      drawn(scene, (ctx) => overhead.draw(ctx, { scene, air: PLAYING, still: false }));
+      return held(gl);
     };
     expect(inked(skyWith({}))).toBe(false);
+    expect(inked(skyWith({ weather: { ...clear, cloud: 0.8 } }))).toBe(false);
     for (const weather of [{ rain: 1 }, { snow: 1 }, { fog: 1 }])
       expect(inked(skyWith({ weather: { ...clear, ...weather } }))).toBe(true);
     expect(inked(skyWith({ glow: 1 }))).toBe(true);
-    expect(makeSky(renderer(), skyOf("CN"))).toBeNull();
   });
 
   it("takes the painted smoke out of the leaf where the live smoke rises", async () => {
-    const day = makeDay("HK", gpu(), skyOf("HK"));
+    const day = makeDay("HK", layersOf(), skyOf("HK"));
     const image = await leaf("HK");
     const paint = (erased?: { box: [number, number, number, number]; feather: number } | null) =>
       paintScene(document.createElement("canvas"), {

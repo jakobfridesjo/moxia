@@ -1,7 +1,7 @@
 import type { CountryCode } from "@/shared/api/commands.ts";
 import type { Air } from "@/pages/radio/lib/air.ts";
 import type { Scene } from "@/pages/radio/lib/ink-painter.ts";
-import type { InkGL } from "@/pages/radio/lib/ink-gl.ts";
+import type { InkLayers } from "@/pages/radio/lib/ink-gl.ts";
 import type { SkyNow } from "@/pages/radio/lib/ink-sky.ts";
 
 /*
@@ -317,28 +317,39 @@ interface Moment {
 export interface Day {
   /** What of the painted leaf the day draws live instead, to leave out when it is painted. */
   erased: Erased | null;
-  /** The day's weather and light over everything drawn so far; `ctx` draws in leaf units. Flush `gl` after. */
+  /** The day's weather and light, queued on the layer under the figures; `ctx` says where leaf units lie. */
   draw: (ctx: CanvasRenderingContext2D, moment: Moment) => void;
-  /** What falls in front of the figures (Hong Kong's dust), drawn after them. Flush `gl` after. */
+  /** What falls in front of the figures (Hong Kong's dust), queued on the layer over them. */
   over: (ctx: CanvasRenderingContext2D, moment: Moment) => void;
+}
+
+/** The part of the screen the shaft may light, in its pixels. */
+function shaftRect(m: DOMMatrix, width: number, height: number): [number, number, number, number] {
+  const [left, top, right, bottom] = SHAFT;
+  const x0 = Math.max(0, m.a * left + m.e);
+  const y0 = Math.max(0, m.d * top + m.f);
+  const x1 = Math.min(width, m.a * right + m.e);
+  const y1 = Math.min(height, m.d * bottom + m.f);
+  return [x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0)];
 }
 
 const isDayPlace = (region: CountryCode): region is DayPlace =>
   region === "TW" || region === "MO" || region === "HK";
 
-/**
- * `region`'s day under the sky `now` says it has, or null where it has none or the GPU can't
- * draw it well.
- */
-export function makeDay(region: CountryCode, gl: InkGL | null, now: () => SkyNow): Day | null {
-  if (!gl || gl.software || !isDayPlace(region)) return null;
+/** Where Hong Kong's light shaft, and the dust in it, may reach, in leaf units: left, top, right and bottom. */
+const SHAFT: [number, number, number, number] = [-400, -400, 1000, 1750];
+
+/** `region`'s day under the sky `now` says it has, or null where it has none. */
+export function makeDay(region: CountryCode, layers: InkLayers, now: () => SkyNow): Day | null {
+  if (!isDayPlace(region)) return null;
   const queue = (ctx: CanvasRenderingContext2D, { scene, air, still }: Moment, over: boolean) => {
     const { weather, glow, night } = now();
     const m = ctx.getTransform();
     const { width, height } = ctx.canvas;
+    const gl = over ? layers.over : layers.under;
     gl.day({
       place: region,
-      rect: [0, 0, width, height],
+      rect: over ? shaftRect(m, width, height) : [0, 0, width, height],
       ink: scene.ink,
       leaf: [m.e, m.f, m.a],
       time: still ? STILL_TIME : air.time,

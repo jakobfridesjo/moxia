@@ -799,21 +799,6 @@ export function drawListener(
   }
 }
 
-/** A drift of mist across the leaf, `phase` seconds into its slow swing. */
-export function drawDrift(ctx: Context, phase: number, tone: Tone) {
-  ctx.save();
-  ctx.translate(500 + Math.sin(phase / 40) * 140, 640);
-  ctx.scale(1, 0.14);
-  const drift = ctx.createRadialGradient(0, 0, 0, 0, 0, 560);
-  drift.addColorStop(0, `rgba(${tone.mist},${0.5 * tone.mistAlpha})`);
-  drift.addColorStop(1, `rgba(${tone.mist},0)`);
-  ctx.fillStyle = drift;
-  ctx.beginPath();
-  ctx.arc(0, 0, 560, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
 /** The part of the leaf on screen, in leaf units. */
 export interface Bounds {
   left: number;
@@ -902,66 +887,122 @@ function setCaption(ctx: Context, layout: Layout, width: number) {
   return { glyph, advances, lines, row, readings };
 }
 
+/** Room past a caption's box its paper halo may spread into, in the same units. */
+const CAPTION_BLEED = CAPTION_SIZE;
+
+/** Measures captions before any is drawn: text is measured the same on any canvas. */
+let measurer: Context | null | undefined;
+
+/** x, y, width and height, in pixels. */
+type Rect = [number, number, number, number];
+
+/** One page of a caption, written once with its halo at full ink, and where each cell of it lies. */
+interface Page {
+  canvas: HTMLCanvasElement;
+  /** The page's top-left corner on the screen, in pixels. */
+  at: [number, number];
+  /** Each cell's part of the page, in screen pixels, tiling it without overlap. */
+  cells: Map<number, Rect>;
+}
+
 /**
- * A subtitle written in `box`: from its top-left corner, line after line
- * down it, starting again at the top once the box is full, each cell of `layout` with as much ink as `inks` gives it, haloed in paper so the
- * painting never runs through them, in `tone`'s writing.
+ * A subtitle written in `box` (in units `unit` pixels each): from its top-left corner, line after
+ * line down it, starting again at the top once the box is full, each cell of `layout` with as
+ * much ink as `inks` gives it, haloed in paper so the painting never runs through them, in
+ * `tone`'s writing. Each page is written once, haloed, and only copied after, cell by cell.
  */
-export function drawCaption(
-  ctx: Context,
-  layout: Layout,
-  inks: readonly number[],
-  { left, top, right, bottom }: Bounds,
-  { alpha, tone }: { alpha: number; tone: Tone }
-) {
-  ctx.save();
+export function captionWriter(layout: Layout, box: Bounds, tone: Tone, unit: number) {
+  measurer ??= document.createElement("canvas").getContext("2d");
+  const { left, top, right, bottom } = box;
   const size = CAPTION_SIZE;
-  const { glyph, advances, lines, row, readings } = setCaption(ctx, layout, right - left);
+  const set = measurer
+    ? setCaption(measurer, layout, right - left)
+    : { glyph: size, advances: [], lines: [], row: CAPTION_LINE, readings: 0 };
+  const { glyph, advances, lines, row, readings } = set;
   const fit = Math.max(1, Math.floor((bottom - top) / row));
-  // Only the lines from the last time the box was started again show: the one being written in.
-  const writing = lines.findLastIndex((line) => line.some((index) => (inks[index] ?? 0) > 0));
-  const first = Math.floor(Math.max(0, writing) / fit) * fit;
-  const spots = new Map<number, [number, number]>();
-  lines.slice(first, first + fit).forEach((line, number) => {
-    let along = 0;
-    for (const index of line) {
-      const advance = advances[index] ?? 0;
-      const inset = layout.chinese ? (advance - size) / 2 : 0;
-      spots.set(index, [left + along + inset, top + readings + number * row]);
-      along += advance;
-    }
-  });
-  ctx.font = `700 ${glyph}px ${CAPTION_FONT}`;
-  ctx.textBaseline = "top";
-  ctx.textAlign = "left";
-  const write = (halo = false) => {
-    const base = ctx.globalAlpha;
-    layout.cells.forEach((cell, index) => {
-      const ink = inks[index] ?? 0;
-      const spot = spots.get(index);
-      if (ink <= 0 || !spot) return;
-      ctx.globalAlpha = base * ink;
-      if (halo) ctx.strokeText(cell.glyph, ...spot);
-      ctx.fillText(cell.glyph, ...spot);
-      if (cell.reading) writeReading(ctx, cell.reading, [spot[0] + size / 2, spot[1]], size, halo);
+  const pages = new Map<number, Page>();
+
+  const write = (first: number): Page | null => {
+    const shown = lines.slice(first, first + fit);
+    const bleed = CAPTION_BLEED;
+    const at: [number, number] = [
+      Math.floor((left - bleed) * unit),
+      Math.floor((top - bleed) * unit),
+    ];
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.ceil((right - left + 2 * bleed) * unit));
+    canvas.height = Math.max(1, Math.ceil((shown.length * row + 2 * bleed) * unit));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.setTransform(unit, 0, 0, unit, -at[0], -at[1]);
+    const spots = new Map<number, [number, number]>();
+    const cells = new Map<number, Rect>();
+    shown.forEach((line, number) => {
+      let along = 0;
+      const y0 = top + number * row - (number === 0 ? bleed : 0);
+      const y1 = top + (number + 1) * row + (number === shown.length - 1 ? bleed : 0);
+      line.forEach((index, place) => {
+        const advance = advances[index] ?? 0;
+        const inset = layout.chinese ? (advance - size) / 2 : 0;
+        spots.set(index, [left + along + inset, top + readings + number * row]);
+        const x0 = left + along - (place === 0 ? bleed : 0);
+        const x1 = place === line.length - 1 ? right + bleed : left + along + advance;
+        const pixels = [x0 * unit, y0 * unit, x1 * unit, y1 * unit].map(Math.round);
+        cells.set(index, [pixels[0], pixels[1], pixels[2] - pixels[0], pixels[3] - pixels[1]]);
+        along += advance;
+      });
     });
-    ctx.globalAlpha = base;
+    ctx.font = `700 ${glyph}px ${CAPTION_FONT}`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    const each = (halo: boolean) => {
+      for (const [index, spot] of spots) {
+        const cell = layout.cells[index];
+        if (!cell) continue;
+        if (halo) ctx.strokeText(cell.glyph, ...spot);
+        ctx.fillText(cell.glyph, ...spot);
+        if (cell.reading)
+          writeReading(ctx, cell.reading, [spot[0] + size / 2, spot[1]], size, halo);
+      }
+    };
+    // A soft wash of paper behind the words lifts them off the painting without a hard outline.
+    ctx.save();
+    ctx.fillStyle = `rgba(${tone.paper},0.6)`;
+    ctx.strokeStyle = ctx.fillStyle;
+    ctx.lineWidth = size * CAPTION_HALO;
+    ctx.lineJoin = "round";
+    ctx.shadowColor = `rgb(${tone.paper})`;
+    // Shadows ignore the transform, so the blur is scaled to the screen by hand.
+    for (const blur of CAPTION_SHADOW) {
+      ctx.shadowBlur = size * blur * unit;
+      each(true);
+    }
+    ctx.restore();
+    ctx.fillStyle = `rgba(${tone.writing},0.92)`;
+    each(false);
+    return { canvas, at, cells };
   };
-  // A soft wash of paper behind the words lifts them off the painting without a hard outline.
-  ctx.save();
-  ctx.fillStyle = `rgba(${tone.paper},${0.6 * alpha})`;
-  ctx.strokeStyle = ctx.fillStyle;
-  ctx.lineWidth = size * CAPTION_HALO;
-  ctx.lineJoin = "round";
-  ctx.shadowColor = `rgba(${tone.paper},${alpha})`;
-  // Shadows ignore the transform, so the blur is scaled to the screen by hand.
-  const scale = Math.hypot(ctx.getTransform().a, ctx.getTransform().b);
-  for (const blur of CAPTION_SHADOW) {
-    ctx.shadowBlur = size * blur * scale;
-    write(true);
-  }
-  ctx.restore();
-  ctx.fillStyle = `rgba(${tone.writing},${0.92 * alpha})`;
-  write();
-  ctx.restore();
+
+  /** Copies the page being written onto `ctx` (which draws in pixels), each cell as inked as `inks` says, all at `alpha`. */
+  return (ctx: Context, inks: readonly number[], alpha: number) => {
+    // Only the lines from the last time the box was started again show: the one being written in.
+    const writing = lines.findLastIndex((line) => line.some((index) => (inks[index] ?? 0) > 0));
+    const first = Math.floor(Math.max(0, writing) / fit) * fit;
+    let page = pages.get(first);
+    if (page === undefined) {
+      const written = write(first);
+      if (!written) return;
+      page = written;
+      pages.set(first, page);
+    }
+    const { canvas, at, cells } = page;
+    ctx.save();
+    for (const [index, [x, y, w, h]] of cells) {
+      const ink = inks[index] ?? 0;
+      if (ink <= 0 || w <= 0 || h <= 0) continue;
+      ctx.globalAlpha = alpha * Math.min(1, ink);
+      ctx.drawImage(canvas, x - at[0], y - at[1], w, h, x, y, w, h);
+    }
+    ctx.restore();
+  };
 }

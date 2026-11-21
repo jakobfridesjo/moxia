@@ -1,9 +1,8 @@
 /*
  * Falling water as mist rather than strokes: a soft veil down the painted sheet whose long, faint
  * streaks pour slowly, finer threads of water down its middle, its edges fraying, with vapour
- * drifting up through it and the whole fading into mist toward its foot. Worked out per point from the one tiling ink noise, the same way on
- * the GPU (`FALLS_SHADER`) as on the CPU (`fallsAt`), so either may draw it. Points are in the
- * weather layer's units.
+ * drifting up through it and the whole fading into mist toward its foot. Worked out per pixel
+ * on the GPU from the one tiling ink noise. Points are in the weather layer's units.
  */
 
 type Rgb = [number, number, number];
@@ -44,67 +43,7 @@ export function fallsBox(rows: Rows): [number, number, number, number] {
   return [left, top, right - left, bottom - top];
 }
 
-const smoothstep = (low: number, high: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - low) / (high - low)));
-  return t * t * (3 - 2 * t);
-};
-
-/** The 256-square tiling `noise` at `x`, `y` texels, drawn between its texels. */
-function sample(noise: Float32Array, x: number, y: number) {
-  const ix = Math.floor(x);
-  const iy = Math.floor(y);
-  const fx = x - ix;
-  const fy = y - iy;
-  const at = (dx: number, dy: number) => noise[((iy + dy) & 255) * 256 + ((ix + dx) & 255)];
-  const top = at(0, 0) + (at(1, 0) - at(0, 0)) * fx;
-  const bottom = at(0, 1) + (at(1, 1) - at(0, 1)) * fx;
-  return top + (bottom - top) * fy;
-}
-
-/** Where the sheet is at `y`: its centre and half width, held at its ends above the top and below the foot. */
-export function sheetAt(rows: Rows, y: number): [number, number] {
-  let i = 0;
-  while (i < rows.length - 2 && y > rows[i + 1][1]) i++;
-  const [ax, ay, ah] = rows[i];
-  const [bx, by, bh] = rows[i + 1];
-  const k = Math.min(1, Math.max(0, (y - ay) / Math.max(by - ay, 1e-3)));
-  return [ax + (bx - ax) * k, ah + (bh - ah) * k];
-}
-
-/** How much light lies at `x`, `y`. */
-export function fallsAt(noise: Float32Array, look: FallsLook, x: number, y: number) {
-  const { rows, flow, time, alpha } = look;
-  const [centre, half] = sheetAt(rows, y);
-  const top = rows[0][1];
-  const bottom = rows[rows.length - 1][1];
-  const fade = (bottom - top) * FADE;
-  const across = x - centre;
-  const u = across / half;
-
-  const rag = sample(noise, y * 0.3 + time * 1.5, u < 0 ? 31 : 157);
-  const sheet =
-    (1 - smoothstep(0.35 + 0.4 * rag, 1.05 + 0.3 * rag, Math.abs(u))) *
-    smoothstep(top, top + 30, y) *
-    (1 - smoothstep(bottom - fade, bottom, y));
-  const streaks = sample(noise, across * 5, (y - flow) * STREAK_LENGTH);
-  const threads = sample(noise, across * 14 + 101, (y - flow) * STREAK_LENGTH * 2 + 53);
-  const core = 1 - smoothstep(0.2, 0.8, Math.abs(u));
-  const water =
-    sheet *
-    (0.5 + 0.5 * smoothstep(0.4, 0.68, streaks) + 0.6 * core * smoothstep(0.5, 0.68, threads));
-
-  const mist =
-    sample(noise, x * 0.9 + time * 0.6 + 17, (y + time * 3) * 0.9 + 89) * 0.75 +
-    sample(noise, x * 2 - time * 0.8 + 61, (y + time * 4.5) * 1.8 + 7) * 0.25;
-  const steam =
-    Math.exp(-((u / 1.5) ** 2)) *
-    smoothstep(top, top + 60, y) *
-    (1 - smoothstep(bottom - fade / 2, bottom + 15, y)) *
-    smoothstep(0.38, 0.78, mist);
-  return Math.min(1, alpha.sheet * water + alpha.steam * steam);
-}
-
-/** `fallsAt` on the GPU: `u_place` maps the target's pixels to units, as offset x, y and pixels a unit. */
+/** The falls' light at each pixel: `u_place` maps the target's pixels to units, as offset x, y and pixels a unit. */
 export const FALLS_SHADER = `#version 300 es
 precision highp float;
 uniform highp sampler2D u_noise;
@@ -117,7 +56,7 @@ uniform vec3 u_light;
 uniform vec2 u_alpha;
 in vec2 v_px;
 out vec4 color;
-/** The noise drawn between its texels, as \`sample\` draws it. */
+/** The noise drawn between its texels. */
 float noiseAt(vec2 p) {
   return texture(u_noise, (mod(p, 256.) + .5) / 256.).r;
 }

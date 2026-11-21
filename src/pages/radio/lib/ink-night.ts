@@ -3,7 +3,7 @@ import type { Air } from "@/pages/radio/lib/air.ts";
 import type { Scene } from "@/pages/radio/lib/ink-painter.ts";
 import { NIGHT_TONE, type Tone } from "@/pages/radio/lib/ink-tone.ts";
 import { blurred, paintSoft, type Tint } from "@/pages/radio/lib/soften.ts";
-import type { InkGL } from "@/pages/radio/lib/ink-gl.ts";
+import type { InkGL, InkLayers } from "@/pages/radio/lib/ink-gl.ts";
 
 /*
  * The radio's paintings at night. The ink stays black, never inverted, on a dark
@@ -132,9 +132,9 @@ interface Moment {
 }
 
 export interface Night {
-  /** Light on the paper behind the ink, under the weather; `ctx` draws in leaf units. */
+  /** Light on the paper behind the ink, under the weather, queued on the layer under the figures (in 2D on `ctx` without one, or while figures are held); `ctx` draws in leaf units. */
   under: (ctx: Context, moment: Moment) => void;
-  /** Night settling over the weather, and moonlight catching on water. */
+  /** Night settling over the weather, queued on the layer over the figures, and moonlight catching on water, drawn on `ctx`. */
   over: (ctx: Context, moment: Moment) => void;
 }
 
@@ -219,10 +219,13 @@ function glGlow(
   });
 }
 
-/** A layer worked out for the whole screen, queued on the GPU at `alpha`; `soft` where nothing in it is sharp. */
-function glLayer(gl: InkGL, layer: HTMLCanvasElement, alpha: number, soft = false) {
-  gl.image({ source: layer, rect: [0, 0, layer.width, layer.height], alpha: clamp(alpha), soft });
+/** A layer worked out for the whole screen, queued on the GPU at `alpha`. */
+function glLayer(gl: InkGL, layer: HTMLCanvasElement, alpha: number) {
+  gl.image({ source: layer, rect: [0, 0, layer.width, layer.height], alpha: clamp(alpha) });
 }
+
+/** How much brighter light drawn in 2D under the layer over the figures is made, so it shows as it would over the `dark` that layer lays on it. */
+const lifted = (gl: InkGL | null | undefined, dark: number) => (gl?.ready ? 1 / (1 - dark) : 1);
 
 /** Where the leaf has no ink, to tell open water from rock and reed: its alpha, read once. */
 function bareOf(image: ImageBitmap) {
@@ -491,7 +494,7 @@ function moonlightOver(image: ImageBitmap) {
   return soft;
 }
 
-function teaStove(image: ImageBitmap, gl: InkGL | null, moon: () => number): Night {
+function teaStove(image: ImageBitmap, layers: InkLayers | null, moon: () => number): Night {
   const scratch = canvasOf(1, 1);
   const fireflies = firefliesIn(83);
   const moonlight = moonlightOver(image);
@@ -499,6 +502,7 @@ function teaStove(image: ImageBitmap, gl: InkGL | null, moon: () => number): Nig
   const leaf = [0, 0, (image.width * 1600) / image.height, 1600] as const;
   return {
     under: (ctx, { scene, held, time, still }) => {
+      const gl = layers?.under;
       const t = still ? 0 : time;
       const flick =
         0.88 +
@@ -559,7 +563,6 @@ function teaStove(image: ImageBitmap, gl: InkGL | null, moon: () => number): Nig
             source: moonlight,
             rect: [m.e, m.f, leaf[2] * m.a, leaf[3] * m.d],
             alpha: moon(),
-            soft: true,
           });
           for (const fire of fires) glGlow(gl, ctx, fire.at, fire.radius, fire.color, fire.stops);
           for (const pool of pools) glGlow(gl, ctx, pool.at, pool.radius, FIREFLY, pool.stops);
@@ -576,6 +579,7 @@ function teaStove(image: ImageBitmap, gl: InkGL | null, moon: () => number): Nig
     // Out of the fire's reach the night closes again over the mist and the needles, so they too are
     // lit only near it; the fireflies glow through it, catching the needles and branches nearest them.
     over: (ctx, { time, still }) => {
+      const gl = layers?.over;
       const sparks = flashing(fireflies, time, still).flatMap(({ at, flash, size }) => [
         {
           at,
@@ -635,10 +639,12 @@ const RIVER: Point[] = [
   [1011, 1415],
   [0, 1415],
 ];
+/** How dark the night lies over the river and its boat. */
+const BOAT_DARK = 0.25;
 /** Where the lamp's reflection starts below the hull, and how far down it breaks up. */
 const REFLECTION = { top: 1138, depth: 240 };
 
-function boatLamp(image: ImageBitmap, gl: InkGL | null, moon: () => number): Night {
+function boatLamp(image: ImageBitmap, layers: InkLayers | null, moon: () => number): Night {
   const scratch = canvasOf(1, 1);
   const bare = bareOf(image);
   const glints = glintsIn(pathOf(RIVER), bare, {
@@ -655,6 +661,7 @@ function boatLamp(image: ImageBitmap, gl: InkGL | null, moon: () => number): Nig
   };
   return {
     under: (ctx, { scene, held, time, still }) => {
+      const gl = layers?.under;
       const { at, flick } = lamp(time, still);
       // The pool on the water, half again as wide as tall.
       const pool: [number, number][] = [
@@ -686,10 +693,10 @@ function boatLamp(image: ImageBitmap, gl: InkGL | null, moon: () => number): Nig
       });
     },
     over: (ctx, { time, still }) => {
-      if (gl?.ready) {
-        gl.fill([0, 0, 0], 0.25);
-        gl.flush(ctx);
-      } else dim(ctx, 0.25);
+      const gl = layers?.over;
+      if (gl?.ready) gl.fill([0, 0, 0], BOAT_DARK);
+      else dim(ctx, BOAT_DARK);
+      const lift = lifted(gl, BOAT_DARK);
       const { at, flick } = lamp(time, still);
       const t = still ? 0 : time;
       const thickness = Math.max(pixel(ctx), 1.9);
@@ -701,7 +708,7 @@ function boatLamp(image: ImageBitmap, gl: InkGL | null, moon: () => number): Nig
           .map(Math.round)
           .join(",");
         sparkle(ctx, [glint.x, glint.y], {
-          alpha: pulse * (0.18 * (1 - near) * moon() + 0.35 * flick * near),
+          alpha: lift * pulse * (0.18 * (1 - near) * moon() + 0.35 * flick * near),
           length: 8 * glint.length,
           thickness: thickness * (1 + near),
           color: warm,
@@ -715,7 +722,7 @@ function boatLamp(image: ImageBitmap, gl: InkGL | null, moon: () => number): Nig
         const x = at[0] + Math.sin(sway * 1.3 + i * 1.7) * 11 * (0.3 + k);
         if (!bare([x, y])) continue;
         const alpha =
-          flick * (1 - k * 0.8) * Math.max(0, 0.22 + 0.11 * Math.sin(sway * 1.4 + i * 2.3));
+          lift * flick * (1 - k * 0.8) * Math.max(0, 0.22 + 0.11 * Math.sin(sway * 1.4 + i * 2.3));
         sparkle(ctx, [x, y], {
           alpha,
           length: 8 * (1.3 + k * 2),
@@ -781,7 +788,7 @@ const LIT = {
   ],
 } satisfies Record<string, Point[]>;
 
-function incense(gl: InkGL | null): Night {
+function incense(layers: InkLayers | null): Night {
   const scratch = canvasOf(1, 1);
   let light: { canvas: HTMLCanvasElement; key: string } | null = null;
   /** What the ember lights, worked out once for the screen: feathered shapes, warm near the tip. */
@@ -840,6 +847,7 @@ function incense(gl: InkGL | null): Night {
     0.86 + 0.14 * Math.sin((still ? 0 : time) * 1.1);
   return {
     under: (ctx, { scene, held, time, still }) => {
+      const gl = layers?.under;
       const ember = emberOf(time, still);
       const lit = lightFor(ctx);
       const warmth: [number, number][] = [
@@ -848,7 +856,7 @@ function incense(gl: InkGL | null): Night {
       ];
       if (gl?.ready && !held) {
         gl.behindInk(scene.ink, () => {
-          glLayer(gl, lit, ember, true);
+          glLayer(gl, lit, ember);
           glGlow(gl, ctx, EMBER, 28, "255,120,32", warmth);
         });
         return;
@@ -863,6 +871,7 @@ function incense(gl: InkGL | null): Night {
       });
     },
     over: (ctx, { time, still }) => {
+      const gl = layers?.over;
       const ember = emberOf(time, still);
       const tip: [number, number][] = [
         [0, 0.9 * ember],
@@ -941,6 +950,8 @@ const FOG_BANKS = [
   { y: 0.93, speed: -0.022, alpha: 0.45 },
 ];
 
+/** How dark the night lies over the gorge. */
+const FALLS_DARK = 0.3;
 /** Fog is soft, so a bank is worked out at this share of the screen's resolution and drawn up. */
 const BANK_RESOLUTION = 0.5;
 
@@ -979,7 +990,7 @@ function fogBank(width: number, height: number, seed: number) {
 
 const wrap = (value: number, span: number) => ((value % span) + span) % span;
 
-function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number): Night {
+function moonlitFalls(image: ImageBitmap, layers: InkLayers | null, moon: () => number): Night {
   const scratch = canvasOf(1, 1);
   const stream = pathOf(STREAM);
   const fall = pathOf(FALL);
@@ -1133,6 +1144,7 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
 
   return {
     under: (ctx, { scene, held, time, still }) => {
+      const gl = layers?.under;
       const parts = make(ctx, scene);
       const t = still ? 0 : time;
       // Cloud hides the moon: its beams and sheen go, and the sky glows less.
@@ -1150,7 +1162,7 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
       if (gl?.ready && !held) {
         gl.behindInk(scene.ink, () => {
           glGlow(gl, ctx, SKY_GLOW.at, SKY_GLOW.reach, "226,234,248", sky);
-          glLayer(gl, parts.sheen, through, true);
+          glLayer(gl, parts.sheen, through);
         });
         glLayer(gl, parts.inlet, inletAlpha);
         parts.beams.forEach((beam, i) => glLayer(gl, beam, beamAlpha(i)));
@@ -1175,6 +1187,7 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
       ctx.restore();
     },
     over: (ctx, { scene, air, time, seconds, still }) => {
+      const gl = layers?.over;
       const parts = make(ctx, scene);
       // The fog drifts with what plays, like the rest of the weather; the light never does.
       if (!still) drift += seconds * (0.15 + 0.85 * air.life);
@@ -1201,7 +1214,6 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
               source: texture,
               rect: [left, y, bankWidth, bankHeight],
               alpha,
-              soft: true,
             });
         // More mist lying on the river, drifting with the current.
         for (const left of [riverAt.x, riverAt.x + bankWidth])
@@ -1210,11 +1222,9 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
             rect: [left, riverAt.y, bankWidth, bankHeight * 1.6],
             alpha: 0.55,
             within: parts.river,
-            soft: true,
           });
-        gl.fill([0, 0, 0], 0.3);
-        gl.flush(ctx);
-        sparkleGlints(ctx, time, still, moon());
+        gl.fill([0, 0, 0], FALLS_DARK);
+        sparkleGlints(ctx, time, still, moon() * lifted(gl, FALLS_DARK));
         return;
       }
       ctx.save();
@@ -1239,13 +1249,13 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
         ctx.drawImage(parts.mist, 0, 0);
       }
       ctx.restore();
-      dim(ctx, 0.3);
+      dim(ctx, FALLS_DARK);
       sparkleGlints(ctx, time, still, moon());
     },
   };
 
   /** Moonlight catching on the water: each glint flares and fades. */
-  function sparkleGlints(ctx: Context, time: number, still: boolean, through: number) {
+  function sparkleGlints(ctx: Context, time: number, still: boolean, light: number) {
     const t = still ? 0 : time;
     const thickness = Math.max(pixel(ctx), 1.7);
     for (const glint of glints) {
@@ -1255,7 +1265,7 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
         // fades in and out over each slide, so it is gone when it starts again from the top.
         const slid = wrap(t * 20 + glint.phase * 30, 60);
         sparkle(ctx, [glint.x, glint.y + slid], {
-          alpha: rise ** 3 * Math.sin((Math.PI * slid) / 60) ** 2 * 0.26 * through,
+          alpha: rise ** 3 * Math.sin((Math.PI * slid) / 60) ** 2 * 0.26 * light,
           length: 9 * glint.length,
           thickness: thickness * 2.2,
           color: "226,234,248",
@@ -1263,7 +1273,7 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
         });
         continue;
       }
-      const alpha = rise ** 10 * 0.56 * through;
+      const alpha = rise ** 10 * 0.56 * light;
       if (alpha < 0.02) continue;
       sparkle(ctx, [glint.x, glint.y], {
         alpha,
@@ -1271,35 +1281,29 @@ function moonlitFalls(image: ImageBitmap, gl: InkGL | null, moon: () => number):
         thickness,
         color: "240,246,255",
       });
-      if (alpha > 0.46)
-        glow(ctx, [glint.x, glint.y], 2.1, "255,255,255", [
-          [0, (alpha - 0.46) * 1.5],
-          [1, 0],
-        ]);
     }
   }
 }
 
 /**
- * How `region`'s painting is lit at night, its weather drawn from `image`. With `gl`, light and
- * dark lie on the GPU and may still wait in it after `under` and `over`: flush `gl` onto the
- * canvas before drawing anything else there.
+ * How `region`'s painting is lit at night, its weather drawn from `image`. With `layers`, light
+ * and dark are queued on the GPU: flush the layers once all is queued.
  */
 export function makeNight(
   region: CountryCode,
   image: ImageBitmap,
-  gl: InkGL | null = null,
+  layers: InkLayers | null = null,
   moon: () => number = () => 1
 ): Night {
   switch (region) {
     case "CN":
-      return teaStove(image, gl, moon);
+      return teaStove(image, layers, moon);
     case "TW":
-      return boatLamp(image, gl, moon);
+      return boatLamp(image, layers, moon);
     case "HK":
-      return incense(gl);
+      return incense(layers);
     case "MO":
-      return moonlitFalls(image, gl, moon);
+      return moonlitFalls(image, layers, moon);
   }
 }
 

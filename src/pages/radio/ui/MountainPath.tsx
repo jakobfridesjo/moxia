@@ -439,21 +439,48 @@ export function MountainPath({
     /** Where the camera was, and when, as the weather was last drawn. */
     let drawnSky = { x: Number.NaN, y: Number.NaN, at: performance.now() };
     const hearAir = listenToAir();
-    // Its weather is drawn only on the GPU, when there is WebGL2 and shaders are on.
+    // Its weather is drawn only on a hardware GPU, when shaders are on: its mist on a layer over
+    // the 2D canvas of what moves, riding the camera with it.
     const gl = shaders ? createInkGL() : null;
+    const skyCanvas = sky.current;
+    if (gl && skyCanvas) {
+      gl.canvas.className = skyCanvas.className;
+      gl.canvas.setAttribute("aria-hidden", "true");
+      skyCanvas.after(gl.canvas);
+    }
+    const layers = gl ? { under: gl, over: gl } : null;
     let weather: Weather | null = null;
     const image = new Image();
-    if (gl) {
+    if (layers) {
       image.src = painting;
       image
         .decode()
-        .then(() => (weather = makeWeather("path", image, SCROLL, tone.current, gl)))
+        .then(() => (weather = makeWeather("path", image, SCROLL, tone.current, layers)))
         .catch(() => undefined);
     }
+    // What each element was last given, so a frame where nothing moves writes nothing.
+    const given = new WeakMap<Element, Map<string, string>>();
+    const changed = (element: Element, key: string, value: string) => {
+      const known = given.get(element) ?? new Map<string, string>();
+      given.set(element, known);
+      if (known.get(key) === value) return false;
+      known.set(key, value);
+      return true;
+    };
+    const style = (
+      element: HTMLElement | null | undefined,
+      key: "translate" | "transform" | "rotate" | "opacity" | "zIndex",
+      value: string
+    ) => {
+      if (element && changed(element, key, value)) element.style[key] = value;
+    };
+    const attribute = (element: Element | null | undefined, key: string, value: string) => {
+      if (element && changed(element, key, value)) element.setAttribute(key, value);
+    };
     const draw = (now: number) => {
       raf = requestAnimationFrame(draw);
-      if (weather && weather.tone !== tone.current)
-        weather = makeWeather("path", image, SCROLL, tone.current, gl);
+      if (layers && weather && weather.tone !== tone.current)
+        weather = makeWeather("path", image, SCROLL, tone.current, layers);
       const state = motion.current;
       const { scale: k, view } = state;
       if (!k) return;
@@ -505,8 +532,7 @@ export function MountainPath({
       const camera = state.camera;
       camera.x += (target.x - camera.x) * follow;
       camera.y += (target.y - camera.y) * follow;
-      if (world.current)
-        world.current.style.transform = `translate3d(${-camera.x}px, ${-camera.y}px, 0)`;
+      style(world.current, "transform", `translate3d(${-camera.x}px, ${-camera.y}px, 0)`);
       // The weather covers only the screen, so it rides along with the camera.
       const weatherCanvas = sky.current;
       const ctx = weatherCanvas?.getContext("2d");
@@ -520,23 +546,23 @@ export function MountainPath({
         Math.abs(camera.x - drawnSky.x) < 0.25 && Math.abs(camera.y - drawnSky.y) < 0.25;
       const due = now - drawnSky.at >= AMBIENT_FRAME_MS - FRAME_SLACK_MS;
       if (weatherCanvas && ctx && weather && (resized || !resting || due)) {
+        const shown = gl ? [weatherCanvas, gl.canvas] : [weatherCanvas];
         if (resized) {
           Object.assign(weatherCanvas, { width, height });
-          Object.assign(weatherCanvas.style, {
-            width: `${view.width}px`,
-            height: `${view.height}px`,
-          });
+          for (const canvas of shown)
+            Object.assign(canvas.style, { width: `${view.width}px`, height: `${view.height}px` });
         }
         const skySeconds = Math.min(0.1, (now - drawnSky.at) / 1000);
         drawnSky = { x: camera.x, y: camera.y, at: now };
-        weatherCanvas.style.translate = `${camera.x}px ${camera.y}px`;
+        for (const canvas of shown) style(canvas, "translate", `${camera.x}px ${camera.y}px`);
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, width, height);
+        gl?.clear(width, height);
         ctx.setTransform(k * ratio, 0, 0, k * ratio, -camera.x * ratio, -camera.y * ratio);
         const air = hearAir({ playing: sounding.current, seconds: skySeconds });
         if (environment) weather.draw(ctx, air, skySeconds, still);
         weather.veil(ctx, air);
-        gl?.flush(ctx);
+        gl?.flush();
       }
 
       let highestSlip = 0;
@@ -549,14 +575,12 @@ export function MountainPath({
         const stone = pointAt(slot.at);
         const { x, y } = slipPlace(slot.at, slot.side, k);
         const slip = slipEls.current.get(id);
-        if (slip) {
-          slip.style.translate = `${x}px ${y}px`;
-          slip.style.zIndex = String(Math.max(0, Math.round(y)));
-        }
+        style(slip, "translate", `${x}px ${y}px`);
+        style(slip, "zIndex", String(Math.max(0, Math.round(y))));
         const tie = tieEls.current.get(id);
-        tie?.firstElementChild?.setAttribute("d", `M${stone.x * k} ${stone.y * k}L${x} ${y}`);
-        tie?.lastElementChild?.setAttribute("cx", String(stone.x * k));
-        tie?.lastElementChild?.setAttribute("cy", String(stone.y * k));
+        attribute(tie?.firstElementChild, "d", `M${stone.x * k} ${stone.y * k}L${x} ${y}`);
+        attribute(tie?.lastElementChild, "cx", String(stone.x * k));
+        attribute(tie?.lastElementChild, "cy", String(stone.y * k));
       }
       if (Math.abs(highestSlip - lastTrail) > 0.5) {
         lastTrail = highestSlip;
@@ -576,16 +600,25 @@ export function MountainPath({
         const pose = swing ? blowPose(swingElapsed) : null;
         const lean = pose ? pose.lean : Math.sin(stride) * ROCK_DEG * gait;
         const caneTurn = pose ? pose.cane : Math.sin(stride) * CANE_SWING_DEG * gait;
-        if (cane.current) cane.current.style.rotate = `${caneTurn}deg`;
-        traveller.current.style.translate = `${(feet.x - TRAVELLER.feet[0] + TRAVELLER.left) * k}px ${(feet.y - TRAVELLER.feet[1] + TRAVELLER.top) * k + bob}px`;
-        traveller.current.style.transform = `scaleX(${state.facesRight ? -1 : 1}) rotate(${lean}deg)`;
+        style(cane.current, "rotate", `${caneTurn}deg`);
+        style(
+          traveller.current,
+          "translate",
+          `${(feet.x - TRAVELLER.feet[0] + TRAVELLER.left) * k}px ${(feet.y - TRAVELLER.feet[1] + TRAVELLER.top) * k + bob}px`
+        );
+        style(
+          traveller.current,
+          "transform",
+          `scaleX(${state.facesRight ? -1 : 1}) rotate(${lean}deg)`
+        );
       }
-      if (patch.current) patch.current.style.opacity = walk.at > 4 ? "1" : "0";
+      style(patch.current, "opacity", walk.at > 4 ? "1" : "0");
     };
     raf = requestAnimationFrame(draw);
     return () => {
       cancelAnimationFrame(raf);
       gl?.dispose();
+      gl?.canvas.remove();
     };
   }, [visible, environment, shaders]);
 

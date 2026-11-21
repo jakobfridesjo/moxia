@@ -1,11 +1,11 @@
 import { inkNoise } from "@/pages/radio/lib/ink-weather.ts";
-import type { InkGL } from "@/pages/radio/lib/ink-gl.ts";
 
 /*
  * Moving to the next place, its painting soaks through the paper from where the
  * finger lifted, like ink spreading in wet paper, with a darker wet edge. The
  * edge is a tiny mask of distance plus noise, worked out afresh each frame and
- * drawn up smoothly, so it comes out soft.
+ * drawn up smoothly, so it comes out soft. The mask is a few dozen cells across,
+ * so the bloom costs three canvas passes a frame.
  */
 
 const INK: [number, number, number] = [20, 19, 18];
@@ -58,11 +58,8 @@ export function soaked(
   return out;
 }
 
-/**
- * Draws a bloom: `incoming` soaked `progress` of the way into `ctx`'s canvas, in place of what
- * it held; with `gl` on a GPU, its mask is worked out there.
- */
-export function bloomer(bloom: Bloom, gl: InkGL | null = null) {
+/** Draws a bloom: `incoming` soaked `progress` of the way into `ctx`'s canvas, in place of what it held. */
+export function bloomer(bloom: Bloom) {
   const mask = document.createElement("canvas");
   const rim = document.createElement("canvas");
   return (ctx: CanvasRenderingContext2D, incoming: HTMLCanvasElement, progress: number) => {
@@ -70,23 +67,6 @@ export function bloomer(bloom: Bloom, gl: InkGL | null = null) {
     const [across, down] = cellsOf(width, height);
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    // A full-screen layer of its own each frame, so on software WebGL the read back costs more
-    // than the 2D path's passes.
-    if (gl?.ready && !gl.software) {
-      ctx.clearRect(0, 0, width, height);
-      gl.bloom(ctx, incoming, {
-        origin: bloom.origin,
-        seed: bloom.seed,
-        edge: edgeAt(bloom.origin, progress, across / down),
-        cells: [across, down],
-        ragged: RAGGED,
-        soft: SOFT,
-        rim: RIM,
-        ink: INK,
-      });
-      ctx.restore();
-      return;
-    }
     for (const canvas of [mask, rim]) Object.assign(canvas, { width: across, height: down });
     const maskCtx = mask.getContext("2d");
     const rimCtx = rim.getContext("2d");

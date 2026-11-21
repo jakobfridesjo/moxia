@@ -15,8 +15,7 @@ import {
 import { inkIn, inkLeft, layOut, type Layout } from "@/pages/radio/lib/captions.ts";
 import {
   CAPTION_LINE,
-  drawCaption,
-  drawDrift,
+  captionWriter,
   drawListener,
   LEAF_HEIGHT,
   leafSize,
@@ -42,7 +41,7 @@ import type { LocalSky } from "@/pages/radio/model/use-local-sky.ts";
 import { DAY_TONE } from "@/pages/radio/lib/ink-tone.ts";
 import { bloomer } from "@/pages/radio/lib/ink-bloom.ts";
 import { AMBIENT_FRAME_MS, FRAME_SLACK_MS } from "@/pages/radio/lib/ink-pace.ts";
-import { createInkGL, type InkGL } from "@/pages/radio/lib/ink-gl.ts";
+import { createInkGL, type InkGL, type InkLayers } from "@/pages/radio/lib/ink-gl.ts";
 import { leafImage } from "@/pages/radio/ui/ink/layers.ts";
 
 /** The last swipe or key that changed what plays: the station, toward `direction`, or the place, from `at` (fractions of the screen). */
@@ -91,8 +90,13 @@ const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
 const washOf = (progress: number) =>
   ease(clamp01(progress / 0.35)) * (1 - ease(clamp01((progress - 0.5) / 0.5)));
 
-/** The paper, "r,g,b", laid over everything drawn so far at `alpha`: by day a wash, by night the dark. */
-function washOut(ctx: CanvasRenderingContext2D, gl: InkGL | null, paper: string, alpha: number) {
+/** The paper, "r,g,b", laid over the painting and its figures at `alpha`: by day a wash, by night the dark. */
+function washOut(
+  ctx: CanvasRenderingContext2D,
+  gl: InkGL | undefined,
+  paper: string,
+  alpha: number
+) {
   if (alpha <= 0.002) return;
   if (gl?.ready) {
     gl.fill(paper.split(",").map(Number) as [number, number, number], alpha);
@@ -117,9 +121,33 @@ const pixelRatio = () => Math.min(2, window.devicePixelRatio || 1);
 const SCENE_CLASS =
   "absolute inset-0 size-full transition-opacity ease-out motion-reduce:transition-none";
 
+/** A renderer whose canvas is shown in `slot`, or null without a hardware GPU. */
+function layerIn(slot: HTMLElement | null) {
+  const gl = slot ? createInkGL() : null;
+  if (!slot || !gl) return null;
+  gl.canvas.className = "absolute inset-0 size-full";
+  slot.replaceChildren(gl.canvas);
+  return gl;
+}
+
+function letGo(layers: Partial<InkLayers> | null | undefined) {
+  for (const gl of [layers?.under, layers?.over]) {
+    gl?.dispose();
+    gl?.canvas.remove();
+  }
+}
+
+/** Bumped whenever the browser finishes loading fonts, so subtitles written in a stand-in font are written again. */
+let fontsLoaded = 0;
+if (typeof document !== "undefined")
+  document.fonts?.addEventListener("loadingdone", () => (fontsLoaded += 1));
+
 /**
  * The painting behind the radio: two canvases take turns holding a place's leaf
- * so a new place fades in over the old, and a third draws the part that moves.
+ * so a new place fades in over the old. Over them lie, in order, the GPU's layer of
+ * light and mist, a canvas for the figures and what falls, the GPU's layer of what
+ * lies in front of the figures, and the subtitles: the browser lays them together,
+ * so nothing is copied from one canvas to another.
  */
 export function InkScene({
   region,
@@ -140,6 +168,9 @@ export function InkScene({
   const sceneA = useRef<HTMLCanvasElement>(null);
   const sceneB = useRef<HTMLCanvasElement>(null);
   const front = useRef<HTMLCanvasElement>(null);
+  const underSlot = useRef<HTMLDivElement>(null);
+  const overSlot = useRef<HTMLDivElement>(null);
+  const subtitles = useRef<HTMLCanvasElement>(null);
   const shown = useRef(0);
   // The animation loop reads the pose from here, so it never restarts when the pose changes.
   const pose = useRef({ listening, writing });
@@ -175,17 +206,24 @@ export function InkScene({
   // At night each painting is lit by something in it; by day some have weather and light of their own.
   const lighting = useRef<Night | null>(null);
   // Each place's night light is worked out once and kept while it is night, so coming back to a place costs nothing.
-  const nights = useRef(new Map<CountryCode, { image: ImageBitmap; gl: InkGL; night: Night }>());
+  const nights = useRef(
+    new Map<CountryCode, { image: ImageBitmap; layers: InkLayers; night: Night }>()
+  );
   const daylight = useRef<Day | null>(null);
-  // Weather, light and blooms are drawn only on the GPU, when there is WebGL2 and shaders are on; made on first use.
-  const gpu = useRef<InkGL | null | undefined>(undefined);
+  // Weather, light and blooms are drawn only on a hardware GPU, when shaders are on; made on first use.
+  const gpu = useRef<InkLayers | null | undefined>(undefined);
   const gpuOf = () => {
-    if (gpu.current === undefined) gpu.current = shaders ? createInkGL() : null;
+    if (gpu.current === undefined) {
+      const under = shaders ? layerIn(underSlot.current) : null;
+      const over = under ? layerIn(overSlot.current) : null;
+      gpu.current = under && over ? { under, over } : null;
+      if (!gpu.current) letGo({ under: under ?? undefined });
+    }
     return gpu.current;
   };
   useEffect(
     () => () => {
-      gpu.current?.dispose();
+      letGo(gpu.current);
       gpu.current = undefined;
       // Made with the renderer just let go, so made afresh.
       weather.current = null;
@@ -239,9 +277,9 @@ export function InkScene({
       const leaving = scenery.current;
       const ground = night ? NIGHT_LOOK[region] : undefined;
       // Without shaders the painting holds still: no weather or bloom, and its night light is painted in once.
-      const gl = image ? gpuOf() : null;
+      const layers = image ? gpuOf() : null;
       const readSky = () => skyNow.current;
-      const day = gl && environment && !night ? makeDay(region, gl, readSky) : null;
+      const day = layers && environment && !night ? makeDay(region, layers, readSky) : null;
       const scene = paintScene(canvas, {
         region,
         width: element.clientWidth,
@@ -252,28 +290,29 @@ export function InkScene({
         inkStrength: ground?.inkStrength,
         erased: day?.erased,
       });
-      if (!gl && night && image && scene) lightOnce(canvas, scene, image);
+      if (!layers && night && image && scene) lightOnce(canvas, scene, image);
       scenery.current = scene;
       toneNow.current = tone;
       if (weather.current?.place !== region || weather.current.tone !== tone)
         weather.current =
-          gl && image
-            ? makeWeather(region, image, leafSize(image), tone, gl, {
+          layers && image
+            ? makeWeather(region, image, leafSize(image), tone, layers, {
                 liveSmoke: Boolean(day?.erased),
                 windOf: () => skyNow.current.weather.wind,
               })
             : null;
       if (!night) nights.current.clear();
       const lit = nights.current.get(region);
-      if (gl && night && image && (lit?.image !== image || lit.gl !== gl))
+      if (layers && night && image && (lit?.image !== image || lit.layers !== layers))
         nights.current.set(region, {
           image,
-          gl,
-          night: makeNight(region, image, gl, () => moonlight(skyNow.current)),
+          layers,
+          night: makeNight(region, image, layers, () => moonlight(skyNow.current)),
         });
-      lighting.current = gl && night && image ? (nights.current.get(region)?.night ?? null) : null;
+      lighting.current =
+        layers && night && image ? (nights.current.get(region)?.night ?? null) : null;
       daylight.current = day;
-      overhead.current = gl && environment ? makeSky(gl, readSky) : null;
+      overhead.current = layers && environment ? makeSky(layers.over, readSky) : null;
       canvas.style.zIndex = "1";
       old.style.zIndex = "0";
       shown.current = next;
@@ -281,7 +320,7 @@ export function InkScene({
       const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const moved = lastMove.current;
       const blooms =
-        gl !== null &&
+        layers !== null &&
         !first &&
         !still &&
         moved?.kind === "place" &&
@@ -312,7 +351,7 @@ export function InkScene({
       };
       const incoming = blooms ? copyOf(canvas) : canvas;
       const soak = blooms
-        ? bloomer({ origin: moved.at, seed: Math.floor(Math.random() * 200) }, gl)
+        ? bloomer({ origin: moved.at, seed: Math.floor(Math.random() * 200) })
         : null;
       const start = performance.now();
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -328,12 +367,9 @@ export function InkScene({
         holding.current = false;
         endChange.current = null;
       };
-      // The GPU takes the soaking painting once, as a texture, so its figures are posed once; in 2D it is read every frame.
-      let taken = false;
       const step = (now: number) => {
         if (leaving) hold(old, leavingHoled, leaving);
-        if (scene && !taken) hold(incoming, holed, scene);
-        taken = soak !== null && gl !== null && gl.ready && !gl.software;
+        if (scene) hold(incoming, holed, scene);
         if (soak) {
           const progress = (now - start) / BLOOM_MS;
           if (progress >= 1) return finish();
@@ -409,7 +445,24 @@ export function InkScene({
     observer.observe(element);
     if (keys?.current) observer.observe(keys.current);
     const hearAir = listenToAir();
-    const gl = gpuOf();
+    const layers = gpuOf();
+    const written = subtitles.current?.getContext("2d") ?? null;
+    let captionsShown = false;
+    const writers = new WeakMap<
+      Caption,
+      { key: string; write: ReturnType<typeof captionWriter> }
+    >();
+    const writerOf = (
+      caption: Caption,
+      key: string,
+      make: () => ReturnType<typeof captionWriter>
+    ) => {
+      const known = writers.get(caption);
+      if (known?.key === key) return known.write;
+      const write = make();
+      writers.set(caption, { key, write });
+      return write;
+    };
     let gust: { start: number; direction: 1 | -1 } | null = null;
     let lastGust = lastMove.current?.id;
     const mover = makeMover();
@@ -437,12 +490,15 @@ export function InkScene({
       const seconds = Math.min(0.1, (now - last) / 1000);
       last = now;
       const ratio = pixelRatio();
-      if (canvas.width !== Math.round(width * ratio)) canvas.width = Math.round(width * ratio);
-      if (canvas.height !== Math.round(height * ratio)) canvas.height = Math.round(height * ratio);
+      const [pixelsAcross, pixelsDown] = [Math.round(width * ratio), Math.round(height * ratio)];
+      if (canvas.width !== pixelsAcross) canvas.width = pixelsAcross;
+      if (canvas.height !== pixelsDown) canvas.height = pixelsDown;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      layers?.under.clear(pixelsAcross, pixelsDown);
+      layers?.over.clear(pixelsAcross, pixelsDown);
       const scene = scenery.current;
       if (!scene) {
         frame = requestAnimationFrame(draw);
@@ -484,12 +540,12 @@ export function InkScene({
           ? (g: CanvasRenderingContext2D) => drawListener(g, scene, listenerPose)
           : undefined,
       };
-      // Light and mist on the GPU wait in `gl`, and land in one go before anything drawn in 2D.
+      // Light and mist are queued on the layer under the figures, what lies in front of them on
+      // the layer over them, and both land once all is queued; what falls and the figures are
+      // drawn in 2D between them.
       lighting.current?.under(ctx, moment);
       if (environment) weather.current?.draw(ctx, air, seconds, still);
       daylight.current?.draw(ctx, moment);
-      gl?.flush(ctx);
-      if (gl && environment && !still) drawDrift(ctx, (now / 1000) * 6, tone);
       if (!held) drawListener(ctx, scene, listenerPose);
       overhead.current?.draw(ctx, moment);
       weather.current?.veil(ctx, air);
@@ -503,11 +559,12 @@ export function InkScene({
         const progress = (now - gust.start) / GUST_MS;
         if (progress >= 1) gust = null;
         else {
-          washOut(ctx, gl, tone.paper, 0.9 * washOf(progress));
+          washOut(ctx, layers?.over, tone.paper, 0.9 * washOf(progress));
           weather.current?.gust(ctx, progress, gust.direction);
         }
       }
-      gl?.flush(ctx);
+      layers?.under.flush();
+      layers?.over.flush();
 
       // Subtitles are written at one size on every painting, however large its leaf is drawn: in units of the screen's height.
       const unit = (height * ratio) / LEAF_HEIGHT;
@@ -518,16 +575,31 @@ export function InkScene({
         right: (room.right * ratio) / unit,
         bottom: LEAF_HEIGHT * CAPTION_END,
       };
-      ctx.save();
-      ctx.setTransform(unit, 0, 0, unit, 0, 0);
-      captions.forEach((caption, index) => {
-        const alpha = inkLeft(caption, now, captions[index + 1]?.at ?? null);
-        if (alpha <= 0) return;
-        const layout = layoutOf(caption);
-        const inks = still ? layout.cells.map(() => 1) : inkIn(caption, layout, now);
-        drawCaption(ctx, layout, inks, box, { alpha, tone });
-      });
-      ctx.restore();
+      const shown = captions
+        .map((caption, index) => ({
+          caption,
+          alpha: inkLeft(caption, now, captions[index + 1]?.at ?? null),
+        }))
+        .filter(({ alpha }) => alpha > 0);
+      // The subtitles' canvas is touched only while there are subtitles, and once more to clear it.
+      if (written && (shown.length > 0 || captionsShown)) {
+        const page = written.canvas;
+        if (page.width !== pixelsAcross) page.width = pixelsAcross;
+        if (page.height !== pixelsDown) page.height = pixelsDown;
+        written.setTransform(1, 0, 0, 1, 0, 0);
+        written.clearRect(0, 0, page.width, page.height);
+        const key = `${Object.values(box).join()}:${unit}:${tone.paper}:${tone.writing}:${fontsLoaded}`;
+        for (const { caption, alpha } of shown) {
+          const layout = layoutOf(caption);
+          const inks = still ? layout.cells.map(() => 1) : inkIn(caption, layout, now);
+          writerOf(caption, key, () => captionWriter(layout, box, tone, unit))(
+            written,
+            inks,
+            alpha
+          );
+        }
+        captionsShown = shown.length > 0;
+      }
 
       frame = requestAnimationFrame(draw);
     };
@@ -545,7 +617,10 @@ export function InkScene({
       {/* The two canvases trade places; their order never changes. */}
       <canvas ref={sceneA} className={SCENE_CLASS} style={{ opacity: 0 }} />
       <canvas ref={sceneB} className={SCENE_CLASS} style={{ opacity: 0 }} />
-      <canvas ref={front} className="absolute inset-0 z-2 size-full" />
+      <div ref={underSlot} className="absolute inset-0 z-2" />
+      <canvas ref={front} className="absolute inset-0 z-3 size-full" />
+      <div ref={overSlot} className="absolute inset-0 z-4" />
+      <canvas ref={subtitles} className="absolute inset-0 z-5 size-full" />
     </div>
   );
 }

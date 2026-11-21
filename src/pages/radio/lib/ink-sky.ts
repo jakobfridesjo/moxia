@@ -96,8 +96,7 @@ void main() {
   vec4 acc = vec4(0);
   // Dawn and dusk warm the sky, most at the top, and the paper more than the ink.
   lay(acc, vec3(1., .7, .45), u_air.z * .14 * smoothstep(1.1, 0., v) * (1. - .6 * inkA) * (1. - night));
-  // An overcast day greys everything a little; at night dark cloud drifts across the sky, hiding the moon.
-  lay(acc, vec3(.5, .52, .55), smoothstep(.5, 1., u_weather.z) * .07 * (1. - night));
+  // At night dark cloud drifts across the sky, hiding the moon.
   if (night > .5 && u_weather.z > .3) {
     float cloud = fbm(vec2(css.x * .003 - u_time * (.006 + .03 * u_air.x), css.y * .006));
     lay(acc, vec3(.06, .07, .09), smoothstep(.3, 1., u_weather.z) * smoothstep(.35, .7, cloud) * .35 * smoothstep(.75, 0., v));
@@ -133,7 +132,7 @@ interface Moment {
 }
 
 export interface Sky {
-  /** The weather in front of the figures; `ctx` draws in leaf units. Flush `gl` after. */
+  /** The weather in front of the figures, queued on `gl`; `ctx` says where leaf units lie. */
   draw: (ctx: CanvasRenderingContext2D, moment: Moment) => void;
 }
 
@@ -147,16 +146,14 @@ export interface SkyNow {
   moon: number;
 }
 
-/** The sky over the paintings, reading what it holds from `now` each frame; null where the GPU can't draw it well. */
-export function makeSky(gl: InkGL | null, now: () => SkyNow): Sky | null {
-  if (!gl || gl.software) return null;
+/** The sky over the paintings, queued on the layer over the figures, reading what it holds from `now` each frame. */
+export function makeSky(gl: InkGL, now: () => SkyNow): Sky {
   return {
     draw: (ctx, { scene, air, still }) => {
       const { weather, glow, night } = now();
-      // A clear sky lays nothing, so it is not drawn: by day cloud greys only once heavy, and dusk warms; by night cloud drifts.
+      // A clear sky lays nothing, so it is not drawn: by day only dusk warms it; by night cloud drifts.
       const falling = !still && (weather.rain > 0 || weather.snow > 0 || weather.storm);
-      const hung =
-        weather.fog > 0 || (night ? weather.cloud > 0.3 : weather.cloud > 0.5 || glow > 0);
+      const hung = weather.fog > 0 || (night ? weather.cloud > 0.3 : glow > 0);
       if (!falling && !hung) return;
       const m = ctx.getTransform();
       const { width, height } = ctx.canvas;

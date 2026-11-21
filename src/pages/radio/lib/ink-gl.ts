@@ -1,10 +1,10 @@
 /*
  * What lies over the paintings and is the same everywhere it spreads (mist, the night's light,
- * the dark, a new place soaking in) worked out per pixel on the GPU with WebGL2, instead of in
- * canvas passes that each blend across the screen. Draws are queued and land on a 2D canvas in
- * one go at `flush`, so they stay in order with what the 2D canvas draws between them. Without
- * WebGL2, or once its context is lost, `createInkGL` gives null or `ready` turns false, and the
- * callers draw in 2D as before.
+ * the dark) worked out per pixel on the GPU with WebGL2, instead of in canvas passes that each
+ * blend across the screen. Each renderer draws on a canvas of its own that is shown as a layer
+ * over the painting, so nothing is copied between canvases: draws are queued and land at
+ * `flush`, in the order they were queued. Without a hardware GPU, or once its context is lost,
+ * `createInkGL` gives null or `ready` turns false, and what it would draw is left out.
  */
 
 import { inkNoise } from "@/pages/radio/lib/ink-weather.ts";
@@ -49,21 +49,6 @@ interface ImageDraw {
   alpha: number;
   /** A canvas lying over the whole target whose alpha the image is kept to. */
   within?: Source;
-  /** Soft all over, like mist, so it may be worked out at a share of the target's resolution. */
-  soft?: boolean;
-}
-
-interface BloomDraw {
-  /** Where it starts, as fractions of the screen across and down. */
-  origin: [number, number];
-  seed: number;
-  /** How far the soaked edge has reached, in the units `soaked` works in. */
-  edge: number;
-  cells: [number, number];
-  ragged: number;
-  soft: number;
-  rim: number;
-  ink: Rgb;
 }
 
 interface FallsDraw {
@@ -100,21 +85,16 @@ type Draw =
   | { kind: "falls"; draw: FallsDraw }
   | { kind: "glow"; draw: GlowDraw }
   | { kind: "image"; draw: ImageDraw }
-  | { kind: "group"; ink: Source; draws: Draw[] }
-  | { kind: "bloom"; draw: BloomDraw; incoming: Source };
+  | { kind: "group"; ink: Source; draws: Draw[] };
 
 export interface InkGL {
   /** False once the context is lost, until it is restored. */
   readonly ready: boolean;
-  /**
-   * Whether WebGL itself runs on the CPU (SwiftShader, llvmpipe). Each flush then reads every
-   * pixel back, which costs more than a full-screen draw in 2D does: worth it only where it
-   * replaces several.
-   */
-  readonly software: boolean;
+  /** The canvas it draws on, shown as a layer of its own. */
+  readonly canvas: HTMLCanvasElement;
   mist: (draw: MistDraw) => void;
   glow: (draw: GlowDraw) => void;
-  /** Falling water and its steam, as `fallsAt` works them out. */
+  /** Falling water and its steam, as `FALLS_SHADER` works them out. */
   falls: (draw: FallsDraw) => void;
   /** A place's day weather and light, as `ink-day.ts` writes it. */
   day: (draw: DayDraw) => void;
@@ -123,28 +103,19 @@ export interface InkGL {
   fill: (color: Rgb, alpha: number) => void;
   /** What `paint` queues, as light lying behind `ink`: cut away wherever it has ink. */
   behindInk: (ink: Source, paint: () => void) => void;
-  /** Soaks `incoming` into `ctx`'s canvas, over whatever it already holds. */
-  bloom: (ctx: CanvasRenderingContext2D, incoming: Source, draw: BloomDraw) => void;
-  /** Draws everything queued onto `ctx`'s canvas, in one go. */
-  flush: (ctx: CanvasRenderingContext2D) => void;
+  /** Starts a frame: the canvas made `width`×`height` pixels and cleared, and anything still queued dropped. */
+  clear: (width: number, height: number) => void;
+  /** Draws everything queued onto the canvas, over what it holds since `clear`. */
+  flush: () => void;
   dispose: () => void;
 }
 
-/** Soft things are worked out at this share of the target's resolution and drawn up. */
-const SOFT_SCALE = 0.5;
-/** Clear pixels kept around what a flush draws, wider than drawing it up ever reaches. */
-const MARGIN = 2;
-/** Texels drawn past the corner soft things take of a canvas kept at the target's size, so drawing them up reaches what lies beyond their edge, not clear canvas. */
-const SPARE = 1;
-/** Left, top, right and bottom, in the target's pixels. */
-type Edges = [number, number, number, number];
-const NOWHERE: Edges = [Infinity, Infinity, -Infinity, -Infinity];
-const union = (a: Edges, b: Edges): Edges => [
-  Math.min(a[0], b[0]),
-  Math.min(a[1], b[1]),
-  Math.max(a[2], b[2]),
-  Math.max(a[3], b[3]),
-];
+/** The two layers a painting's effects lie on: under the figures, and over them. */
+export interface InkLayers {
+  under: InkGL;
+  over: InkGL;
+}
+
 /** Flushes a texture may go unused before it is let go. */
 const TEXTURE_LIFE = 240;
 const MAX_STOPS = 8;
@@ -230,41 +201,6 @@ void main() {
   color = c;
 }`;
 
-/** The bloom's mask, a pixel a cell: how soaked each cell is, and how dark its wet rim. */
-const SOAK = `#version 300 es
-precision highp float;
-uniform highp sampler2D u_noise;
-uniform vec2 u_origin;
-uniform vec2 u_cells;
-uniform float u_seed;
-uniform float u_edge;
-uniform float u_ragged;
-uniform float u_soft;
-uniform float u_rim;
-out vec4 color;
-void main() {
-  ivec2 cell = ivec2(gl_FragCoord.xy);
-  int seed = int(u_seed);
-  float n = texelFetch(u_noise, ivec2((cell.x * 2 + seed * 3) & 255, (cell.y * 2 + seed) & 255), 0).r;
-  vec2 at = vec2(cell) / u_cells;
-  float distance = length(vec2((at.x - u_origin.x) * (u_cells.x / u_cells.y), at.y - u_origin.y));
-  float soak = clamp((u_edge - (distance * 0.8 + n * u_ragged)) / u_soft, 0.0, 1.0);
-  color = vec4(soak, soak * (1.0 - soak) * 4.0 * u_rim, 0.0, 1.0);
-}`;
-
-/** The new place through the mask, drawn up smoothly as the 2D path draws its mask up, under its rim. */
-const BLOOM = `#version 300 es
-precision highp float;
-uniform sampler2D u_incoming;
-uniform sampler2D u_soak;
-uniform vec3 u_ink;
-in vec2 v_local;
-out vec4 color;
-void main() {
-  vec2 mask = texture(u_soak, v_local).rg;
-  color = vec4(u_ink * mask.g, mask.g) + texture(u_incoming, v_local) * mask.r * (1.0 - mask.g);
-}`;
-
 interface Program {
   program: WebGLProgram;
   uniforms: Map<string, WebGLUniformLocation | null>;
@@ -295,28 +231,33 @@ function compile(gl: WebGL2RenderingContext, fragment: string): Program | null {
 }
 
 /**
- * A renderer of its own, drawing on a canvas no one sees; null without WebGL2. `software` says
- * whether its WebGL runs on the CPU, where that is known better than the renderer's name tells.
+ * A renderer drawing on `canvas`, to be shown as a layer; null without WebGL2 on a hardware GPU.
+ * `allowSoftware` takes WebGL running on the CPU too, as the test browser's does.
  */
-export function createInkGL({ software: assumed }: { software?: boolean } = {}): InkGL | null {
-  const canvas = document.createElement("canvas");
+export function createInkGL(
+  canvas: HTMLCanvasElement = document.createElement("canvas"),
+  { allowSoftware = false }: { allowSoftware?: boolean } = {}
+): InkGL | null {
   const gl = canvas.getContext("webgl2", {
     alpha: true,
     premultipliedAlpha: true,
     antialias: false,
     depth: false,
     stencil: false,
+    // On the CPU every effect costs more than it is worth, so they are left out as without shaders.
+    failIfMajorPerformanceCaveat: !allowSoftware,
   });
   if (!gl) return null;
 
-  let programs: Record<"mist" | "glow" | "falls" | "image" | "soak" | "bloom", Program> | null =
-    null;
+  let programs: Record<"mist" | "glow" | "falls" | "image", Program> | null = null;
   let textures = new Map<object, Held>();
-  /** Textures drawn into: a group of light, and the bloom's mask. */
-  let targets = new Map<
-    "group" | "soak",
-    { fbo: WebGLFramebuffer; texture: WebGLTexture; width: number; height: number }
-  >();
+  /** The texture a group of light is drawn into. */
+  let group: {
+    fbo: WebGLFramebuffer;
+    texture: WebGLTexture;
+    width: number;
+    height: number;
+  } | null = null;
   /** Numbers made once, drawn between their texels: the ink noise and the day's lattice. */
   let floats = new Map<"noise" | "lattice", WebGLTexture>();
   /** Each place's day, compiled the first time it is drawn; null if it would not compile. */
@@ -334,12 +275,10 @@ export function createInkGL({ software: assumed }: { software?: boolean } = {}):
       glow: compile(gl, GLOW),
       falls: compile(gl, FALLS_SHADER),
       image: compile(gl, IMAGE),
-      soak: compile(gl, SOAK),
-      bloom: compile(gl, BLOOM),
     };
     programs = Object.values(made).every(Boolean) ? (made as typeof programs) : null;
     textures = new Map();
-    targets = new Map();
+    group = null;
     days = new Map();
     floats = new Map();
     gl.bindVertexArray(gl.createVertexArray());
@@ -349,11 +288,6 @@ export function createInkGL({ software: assumed }: { software?: boolean } = {}):
   };
   setUp();
   if (!programs) return null;
-  const debug = gl.getExtension("WEBGL_debug_renderer_info");
-  const rendererName = String(
-    gl.getParameter(debug ? debug.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? ""
-  );
-  const software = assumed ?? /swiftshader|llvmpipe|softpipe|software/i.test(rendererName);
 
   canvas.addEventListener("webglcontextlost", (event) => {
     event.preventDefault();
@@ -428,19 +362,18 @@ export function createInkGL({ software: assumed }: { software?: boolean } = {}):
     return texture;
   };
 
-  /** The texture `name` is drawn into, `width`×`height`, bound to draw into. */
-  const drawInto = (name: "group" | "soak", width: number, height: number) => {
+  /** The texture a group of light is drawn into, `width`×`height`, bound to draw into. */
+  const drawIntoGroup = (width: number, height: number) => {
     // Nothing may sample a texture while it is drawn into.
     bind(0, null);
     bind(1, null);
-    const known = targets.get(name);
-    if (known?.width === width && known.height === height) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, known.fbo);
-      return known;
+    if (group?.width === width && group.height === height) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, group.fbo);
+      return group;
     }
-    if (known) {
-      gl.deleteFramebuffer(known.fbo);
-      gl.deleteTexture(known.texture);
+    if (group) {
+      gl.deleteFramebuffer(group.fbo);
+      gl.deleteTexture(group.texture);
     }
     const texture = gl.createTexture();
     makeOnSpareUnit(texture);
@@ -451,9 +384,8 @@ export function createInkGL({ software: assumed }: { software?: boolean } = {}):
     const fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    const made = { fbo, texture, width, height };
-    targets.set(name, made);
-    return made;
+    group = { fbo, texture, width, height };
+    return group;
   };
 
   const bind = (unit: number, texture: WebGLTexture | null) => {
@@ -539,42 +471,12 @@ export function createInkGL({ software: assumed }: { software?: boolean } = {}):
         return;
       }
       case "group": {
-        const into = drawInto("group", gl.drawingBufferWidth, gl.drawingBufferHeight);
+        const into = drawIntoGroup(gl.drawingBufferWidth, gl.drawingBufferHeight);
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         for (const inner of draw.draws) render(inner, target);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         image(into.texture, [0, 0, ...target], 1, target, true, 2, draw.ink);
-        return;
-      }
-      case "bloom": {
-        const { origin, seed, edge, cells, ragged, soft, rim, ink } = draw.draw;
-        // First the mask, a pixel a cell, written as it is rather than laid over anything.
-        const mask = drawInto("soak", ...cells);
-        gl.viewport(0, 0, ...cells);
-        gl.disable(gl.BLEND);
-        const soak = program("soak");
-        bind(1, floatTexture("noise"));
-        gl.uniform1i(soak("u_noise"), 1);
-        gl.uniform2f(soak("u_origin"), ...origin);
-        gl.uniform2f(soak("u_cells"), ...cells);
-        gl.uniform1f(soak("u_seed"), seed);
-        gl.uniform1f(soak("u_edge"), edge);
-        gl.uniform1f(soak("u_ragged"), ragged);
-        gl.uniform1f(soak("u_soft"), soft);
-        gl.uniform1f(soak("u_rim"), rim);
-        quad(soak, [0, 0, ...cells], cells);
-        gl.enable(gl.BLEND);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        // Then the new place through it, the mask drawn up smoothly.
-        const bloom = program("bloom");
-        bind(0, textureOf(draw.incoming));
-        bind(1, mask.texture);
-        gl.uniform1i(bloom("u_incoming"), 0);
-        gl.uniform1i(bloom("u_soak"), 1);
-        gl.uniform3f(bloom("u_ink"), ink[0] / 255, ink[1] / 255, ink[2] / 255);
-        quad(bloom, [0, 0, ...target], target);
         return;
       }
     }
@@ -603,20 +505,6 @@ export function createInkGL({ software: assumed }: { software?: boolean } = {}):
     quad(uniform, rect, target);
   };
 
-  /** The part of the target `draw` may touch, as left, top, right and bottom. */
-  const reach = (draw: Draw): Edges => {
-    if (draw.kind === "bloom") return [-Infinity, -Infinity, Infinity, Infinity];
-    if (draw.kind === "group") return draw.draws.map(reach).reduce(union, NOWHERE);
-    const [x, y, width, height] = draw.draw.rect;
-    return [x, y, x + width, y + height];
-  };
-
-  const soft = (draw: Draw): boolean =>
-    draw.kind === "mist" ||
-    draw.kind === "glow" ||
-    draw.kind === "falls" ||
-    (draw.kind === "image" && draw.draw.soft === true);
-
   const add = (draw: Draw) => (collecting ?? queue).push(draw);
 
   const sweep = () => {
@@ -627,134 +515,28 @@ export function createInkGL({ software: assumed }: { software?: boolean } = {}):
       }
   };
 
-  /** Draws `draws` onto `ctx`'s canvas in one go, giving the part of it they were laid on, if any. */
-  const lay = (ctx: CanvasRenderingContext2D, draws: Draw[]): Edges | null => {
-    flushes += 1;
-    const target: [number, number] = [ctx.canvas.width, ctx.canvas.height];
-    const scale = draws.every(soft) ? SOFT_SCALE : 1;
-    const width = Math.max(1, Math.ceil(target[0] * scale));
-    const height = Math.max(1, Math.ceil(target[1] * scale));
-    // On the CPU every pixel of the canvas is read back, so it is no bigger than what is drawn.
-    // On a GPU it keeps the target's size, as making it anew costs more than its unused part:
-    // soft things take its top left corner, with texels to spare past their edge.
-    const [fullWidth, fullHeight] = software ? [width, height] : target;
-    if (canvas.width !== fullWidth || canvas.height !== fullHeight)
-      Object.assign(canvas, { width: fullWidth, height: fullHeight });
-    const spare = width + SPARE <= fullWidth && height + SPARE <= fullHeight ? SPARE : 0;
-    const [across, down] = [width + spare, height + spare];
-    /** The target as wide as all that is drawn, spare texels too, in its own pixels. */
-    const reached: [number, number] = [(target[0] * across) / width, (target[1] * down) / height];
-    // Only what the draws reach is laid on the target, with a margin of clear pixels so it is
-    // drawn up just as the whole canvas would be. All of it is cleared: drawing up may reach a
-    // texel past the part laid.
-    const [kx, ky] = [width / target[0], height / target[1]];
-    const [left, top, right, bottom] = draws.map(reach).reduce(union, NOWHERE);
-    const x0 = Math.max(0, Math.floor(left * kx) - MARGIN);
-    const y0 = Math.max(0, Math.floor(top * ky) - MARGIN);
-    const x1 = Math.min(width, Math.ceil(right * kx) + MARGIN);
-    const y1 = Math.min(height, Math.ceil(bottom * ky) + MARGIN);
-    if (x1 <= x0 || y1 <= y0) return null;
-    gl.viewport(0, fullHeight - down, across, down);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    for (const draw of draws) render(draw, reached);
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "low";
-    ctx.drawImage(
-      canvas,
-      x0,
-      y0,
-      x1 - x0,
-      y1 - y0,
-      x0 / kx,
-      y0 / ky,
-      (x1 - x0) / kx,
-      (y1 - y0) / ky
-    );
-    ctx.restore();
-    if (flushes % 60 === 0) sweep();
-    return [
-      Math.floor(x0 / kx),
-      Math.floor(y0 / ky),
-      Math.min(target[0], Math.ceil(x1 / kx)),
-      Math.min(target[1], Math.ceil(y1 / ky)),
-    ];
-  };
-
-  /** Room the size of the target, kept clear, to cut light by the ink in without the GPU. */
-  const cutting = document.createElement("canvas");
-
-  /**
-   * Soft light behind `ink`, on the CPU: worked out at a share of the resolution like any soft
-   * thing, then cut by the ink in 2D at the target's own, so the cut stays as sharp as the ink.
-   */
-  const layBehind = (ctx: CanvasRenderingContext2D, ink: Source, draws: Draw[]) => {
-    const { width, height } = ctx.canvas;
-    if (cutting.width !== width || cutting.height !== height)
-      Object.assign(cutting, { width, height });
-    const cut = cutting.getContext("2d");
-    if (!cut) return;
-    const laid = lay(cut, draws);
-    if (!laid) return;
-    const box: Rect = [laid[0], laid[1], laid[2] - laid[0], laid[3] - laid[1]];
-    cut.globalCompositeOperation = "destination-out";
-    cut.drawImage(ink, ...box, ...box);
-    cut.globalCompositeOperation = "source-over";
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-    ctx.drawImage(cutting, ...box, ...box);
-    ctx.restore();
-    cut.clearRect(...box);
-  };
-
-  /** An image as it is, laid in 2D: on the CPU that costs far less than drawing it in WebGL and reading it back. */
-  const layImage = (ctx: CanvasRenderingContext2D, { source, rect, alpha }: ImageDraw) => {
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = Math.min(1, Math.max(0, alpha));
-    ctx.globalCompositeOperation = "source-over";
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "low";
-    ctx.drawImage(source, ...rect);
-    ctx.restore();
-  };
-
-  const flush: InkGL["flush"] = (ctx) => {
-    if (!queue.length) return;
+  const flush: InkGL["flush"] = () => {
     const draws = queue;
     queue = [];
+    if (!draws.length || lost || disposed) return;
+    flushes += 1;
+    const target: [number, number] = [canvas.width, canvas.height];
+    for (const draw of draws) render(draw, target);
+    if (flushes % 60 === 0) sweep();
+  };
+
+  const clear: InkGL["clear"] = (width, height) => {
+    queue = [];
     if (lost || disposed) return;
-    if (!software) {
-      lay(ctx, draws);
-      return;
-    }
-    // On the CPU every pixel WebGL draws at the target's resolution is dear, so only what is soft
-    // goes through it, at a share of that: sharp images and the cut by the ink are laid in 2D.
-    let waiting: Draw[] = [];
-    const layWaiting = () => {
-      if (waiting.length) lay(ctx, waiting);
-      waiting = [];
-    };
-    for (const draw of draws) {
-      if (draw.kind === "image" && !draw.draw.soft && !draw.draw.within) {
-        layWaiting();
-        layImage(ctx, draw.draw);
-      } else if (draw.kind === "group" && draw.draws.every(soft)) {
-        layWaiting();
-        layBehind(ctx, draw.ink, draw.draws);
-      } else waiting.push(draw);
-    }
-    layWaiting();
+    if (canvas.width !== width || canvas.height !== height)
+      Object.assign(canvas, { width, height });
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
   };
 
   return {
-    software,
+    canvas,
     get ready() {
       return !lost && !disposed;
     },
@@ -784,10 +566,7 @@ export function createInkGL({ software: assumed }: { software?: boolean } = {}):
       }
       queue.push({ kind: "group", ink, draws });
     },
-    bloom: (ctx, incoming, draw) => {
-      queue.push({ kind: "bloom", draw, incoming });
-      flush(ctx);
-    },
+    clear,
     flush,
     dispose: () => {
       queue = [];

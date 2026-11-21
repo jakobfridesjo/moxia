@@ -1,9 +1,9 @@
 import type { CountryCode } from "@/shared/api/commands.ts";
 import type { Air } from "@/pages/radio/lib/air.ts";
-import { DAY_TONE, type Tone } from "@/pages/radio/lib/ink-tone.ts";
+import type { Tone } from "@/pages/radio/lib/ink-tone.ts";
 import { blurred, blurredTile } from "@/pages/radio/lib/soften.ts";
-import type { InkGL } from "@/pages/radio/lib/ink-gl.ts";
-import { fallsAt, fallsBox, pour, type FallsLook, type Rows } from "@/pages/radio/lib/ink-falls.ts";
+import type { InkGL, InkLayers } from "@/pages/radio/lib/ink-gl.ts";
+import { fallsBox, pour, type FallsLook, type Rows } from "@/pages/radio/lib/ink-falls.ts";
 
 /*
  * The weather over each painting: fog, mist, clouds, smoke and falling water and
@@ -11,7 +11,10 @@ import { fallsAt, fallsBox, pour, type FallsLook, type Rows } from "@/pages/radi
  * is cut out of the painting it falls from: the boxes below hold isolated marks
  * (one needle stroke, one leaf, one cloud) in the layer's units. Nothing here
  * follows the sound: it moves at its own steady pace while something plays, and
- * once nothing plays it slows and mist closes over the whole painting.
+ * once nothing plays it slows and mist closes over the whole painting. Mist and
+ * falling water are worked out on the GPU, on the layer under the figures (the
+ * veil and the gust on the one over them); what is cut out of the painting is
+ * drawn in 2D, over that mist.
  */
 
 type Point = [number, number];
@@ -37,24 +40,8 @@ const TW_CLOUDS: Box[] = [
   [416, 393, 590, 190],
   [6, 583, 534, 155],
 ];
-/** Su Dongpo's painted incense: the box it lies in, and its line from his hands upward. */
+/** Su Dongpo's painted incense: the box it lies in. */
 const HK_SMOKE_BOX: Box = [0, 356, 374, 439];
-const HK_SMOKE: Point[] = [
-  [335, 802],
-  [329, 767],
-  [315, 739],
-  [286, 704],
-  [244, 670],
-  [195, 644],
-  [165, 607],
-  [153, 572],
-  [149, 537],
-  [146, 495],
-  [153, 460],
-  [112, 439],
-  [70, 412],
-  [35, 379],
-];
 const MO_LEAVES: Box[] = [
   [120, 81, 11, 7],
   [123, 91, 10, 6],
@@ -110,9 +97,6 @@ const PATH_FALLS: Rows = [
   [1136, 1239, 14],
   [1136, 1311, 18],
 ];
-
-/** The share of the screen's resolution mist is worked out at. */
-const FOG_RESOLUTION = 0.4;
 
 const clamp = (value: number, low = 0, high = 1) => Math.min(high, Math.max(low, value));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -214,22 +198,14 @@ interface Sky {
   height: number;
   /** The part of the layer on screen, in units. */
   view: { left: number; top: number; right: number; bottom: number };
-  scratch: HTMLCanvasElement;
-  /** The mist's pattern, and the paper's for the veil, made once each. */
-  patterns: Map<string, CanvasPattern>;
   time: number;
   /** How hard the wind blows, 1 as each painting was painted: more falls, and faster sideways. */
   gust: number;
   /** Effect seconds weighed by the wind, which mist drifts by, so a change of wind never makes it jump. */
   blown: number;
   tone: Tone;
-  /** Draws the mist on the GPU, when there is WebGL2. */
-  gl: InkGL | null;
-  /**
-   * Whether mist may wait to be drawn with whatever mist follows it, in one go: only while
-   * nothing but mist is drawn, so it stays under what is drawn after it.
-   */
-  batching: boolean;
+  /** The layer mist and falling water are queued on now: under the figures, or over them. */
+  gl: InkGL;
 }
 
 interface FogOptions {
@@ -251,7 +227,10 @@ interface FogOptions {
   softness?: number;
 }
 
-/** Mist over `box`, faded at its edges, drawn on `ctx` (which draws in layer units). */
+/** The share of the screen's resolution mist's pattern is laid out at, which sets how its texels line up. */
+const MIST_SCRATCH = 0.4;
+
+/** Mist over `box`, faded at its edges, queued on the sky's layer; `ctx` says where layer units lie on the screen. */
 function fog(ctx: Context, sky: Sky, [x, y, w, h]: Box, options: FogOptions) {
   const { drift = [6, 0], grain, stretch = 1, edge = 0.3, side = 0.18, parallax, paper } = options;
   const color = paper ? sky.tone.paper : sky.tone.mist;
@@ -264,70 +243,24 @@ function fog(ctx: Context, sky: Sky, [x, y, w, h]: Box, options: FogOptions) {
   let dy = m.d * y + m.f;
   if (parallax) dy += (dy + dh / 2 - ctx.canvas.height / 2) * parallax;
   const { width, height } = ctx.canvas;
-  if (alpha <= 0.002 || dw <= 1 || dh <= 1) return;
+  if (alpha <= 0.002 || dw <= 1 || dh <= 1 || !sky.gl.ready) return;
   if (dx + dw < 0 || dx > width || dy + dh < 0 || dy > height) return;
-  // Mist is soft, so it is worked out at a fraction of the screen's resolution and drawn up.
-  const W = Math.ceil(dw * FOG_RESOLUTION);
-  const H = Math.ceil(dh * FOG_RESOLUTION);
-  const unit = m.a * FOG_RESOLUTION;
+  // The tile is laid as a 2D canvas lays a pattern over a scratch of this share of the screen.
+  const W = Math.ceil(dw * MIST_SCRATCH);
+  const H = Math.ceil(dh * MIST_SCRATCH);
+  const unit = m.a * MIST_SCRATCH;
   const tile = (grain * unit) / 256;
   const span = 256 * tile;
-  const origin: Point = [
-    (sky.blown * drift[0] * unit) % span,
-    (sky.time * drift[1] * unit) % (span * stretch),
-  ];
-  if (sky.gl?.ready) {
-    sky.gl.mist({
-      rect: [dx, dy, dw, dh],
-      tile: fogTile(color, softness),
-      scratch: [W, H],
-      origin,
-      cell: [tile, tile * stretch],
-      alpha: Math.min(1, alpha),
-      edge,
-      side,
-    });
-    if (!sky.batching) sky.gl.flush(ctx);
-    return;
-  }
-  const scratch = sky.scratch;
-  if (scratch.width < W) scratch.width = W;
-  if (scratch.height < H) scratch.height = H;
-  const g = scratch.getContext("2d");
-  if (!g) return;
-  g.setTransform(1, 0, 0, 1, 0, 0);
-  g.globalCompositeOperation = "source-over";
-  g.clearRect(0, 0, W + 2, H + 2);
-  const key = `${color}:${softness}`;
-  let pattern = sky.patterns.get(key);
-  if (!pattern) {
-    pattern = g.createPattern(fogTile(color, softness), "repeat") ?? undefined;
-    if (!pattern) return;
-    sky.patterns.set(key, pattern);
-  }
-  pattern.setTransform(new DOMMatrix().translate(...origin).scale(tile, tile * stretch));
-  g.fillStyle = pattern;
-  g.fillRect(0, 0, W, H);
-  g.globalCompositeOperation = "destination-in";
-  for (const [fade, across] of [
-    [edge, false],
-    [side, true],
-  ] as const) {
-    if (fade <= 0) continue;
-    const ramp = across ? g.createLinearGradient(0, 0, W, 0) : g.createLinearGradient(0, 0, 0, H);
-    ramp.addColorStop(0, "rgba(0,0,0,0)");
-    ramp.addColorStop(fade, "#000");
-    ramp.addColorStop(1 - fade, "#000");
-    ramp.addColorStop(1, "rgba(0,0,0,0)");
-    g.fillStyle = ramp;
-    g.fillRect(0, 0, W, H);
-  }
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalAlpha = Math.min(1, alpha);
-  ctx.imageSmoothingQuality = "low";
-  ctx.drawImage(scratch, 0, 0, W, H, dx, dy, dw, dh);
-  ctx.restore();
+  sky.gl.mist({
+    rect: [dx, dy, dw, dh],
+    tile: fogTile(color, softness),
+    scratch: [W, H],
+    origin: [(sky.blown * drift[0] * unit) % span, (sky.time * drift[1] * unit) % (span * stretch)],
+    cell: [tile, tile * stretch],
+    alpha: Math.min(1, alpha),
+    edge,
+    side,
+  });
 }
 
 /** Mist over an area given as fractions of the layer. */
@@ -491,51 +424,7 @@ function fallers(
   };
 }
 
-/** Short strokes travelling along a line of water from `start` to `end`, in units. */
-function flowMarks(
-  sky: Sky,
-  {
-    start,
-    end,
-    count,
-    length,
-    alpha,
-    jitter,
-  }: {
-    start: Point;
-    end: Point;
-    count: number;
-    length: number;
-    alpha: number;
-    jitter: Point;
-  }
-) {
-  let travelled = 0;
-  return (ctx: Context, air: Air, seconds: number) => {
-    travelled += seconds * 0.6 * (0.2 + 0.8 * air.life);
-    const direction = Math.sign(end[0] - start[0]) || 1;
-    ctx.lineCap = "round";
-    ctx.lineWidth = 2;
-    for (let i = 0; i < count; i++) {
-      const k = (travelled * 0.25 + i / count) % 1;
-      const x = lerp(start[0], end[0], k) + Math.sin(i * 7.3) * jitter[0];
-      const y = lerp(start[1], end[1], k) + Math.cos(i * 3.1) * jitter[1];
-      ctx.strokeStyle = `rgba(${sky.tone.ink},${alpha * Math.sin(k * Math.PI)})`;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + direction * length, y + 3);
-      ctx.stroke();
-    }
-  };
-}
-
-/** The share of the screen's resolution falling water is worked out at without the GPU. */
-const FALLS_RESOLUTION = 0.5;
-
-/**
- * Water misting down a painted sheet, worked out by `fallsAt`: on the GPU when there is one, else
- * on the CPU at a fraction of the screen's resolution.
- */
+/** Water misting down a painted sheet, worked out by the falls shader. */
 function waterfall(sky: Sky, rows: Rows) {
   let fallen = 0;
   const [left, top, width, height] = fallsBox(rows);
@@ -550,36 +439,11 @@ function waterfall(sky: Sky, rows: Rows) {
       alpha: { sheet: 0.3, steam: 0.3 },
     };
     const m = ctx.getTransform();
-    const rect: Box = [m.a * left + m.e, m.d * top + m.f, width * m.a, height * m.d];
-    if (sky.gl?.ready) {
-      sky.gl.falls({ rect, look, place: [m.e, m.f, m.a] });
-      if (!sky.batching) sky.gl.flush(ctx);
-      return;
-    }
-    const W = Math.max(1, Math.ceil(rect[2] * FALLS_RESOLUTION));
-    const H = Math.max(1, Math.ceil(rect[3] * FALLS_RESOLUTION));
-    const scratch = sky.scratch;
-    if (scratch.width < W) scratch.width = W;
-    if (scratch.height < H) scratch.height = H;
-    const g = scratch.getContext("2d");
-    if (!g) return;
-    const pixels = g.createImageData(W, H);
-    const noise = inkNoise();
-    for (let j = 0; j < H; j++) {
-      const y = (rect[1] + ((j + 0.5) * rect[3]) / H - m.f) / m.d;
-      for (let i = 0; i < W; i++) {
-        const x = (rect[0] + ((i + 0.5) * rect[2]) / W - m.e) / m.a;
-        const light = fallsAt(noise, look, x, y);
-        if (light <= 0) continue;
-        pixels.data.set([...look.light, light * 255], (j * W + i) * 4);
-      }
-    }
-    g.putImageData(pixels, 0, 0);
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.imageSmoothingQuality = "low";
-    ctx.drawImage(scratch, 0, 0, W, H, ...rect);
-    ctx.restore();
+    sky.gl.falls({
+      rect: [m.a * left + m.e, m.d * top + m.f, width * m.a, height * m.d],
+      look,
+      place: [m.e, m.f, m.a],
+    });
   };
 }
 
@@ -598,7 +462,7 @@ function ribbon(
     seed = 0,
   }: { lean: number; sway: number; alpha: number; width: number; speed: number; seed?: number }
 ) {
-  const steps = 46;
+  const steps = 24;
   const { time } = sky;
   let [px, py] = [x0, y0];
   ctx.lineCap = "butt";
@@ -628,8 +492,11 @@ function ribbon(
 
 const stopped = (air: Air) => 1 - air.life;
 
+/** How tall each strip of the boat's wobbling reflection is, in units. */
+const REFLECTION_ROW = 3;
+
 interface Effect {
-  /** Mist stays when motion is reduced; everything else stops. */
+  /** Mist (and falling water) is queued on the GPU, and stays when motion is reduced; everything else is drawn in 2D, and stops. */
   mist?: boolean;
   /** Brings painted smoke to life: left out where the day draws the smoke live instead. */
   smoke?: boolean;
@@ -733,7 +600,7 @@ const EFFECTS: Record<WeatherPlace, (sky: Sky) => Effect[]> = {
     const lanes: [number, number, number, number, number, boolean, number][] = [
       [0, 0.165, 0.5, 1, 0.3, false, 0],
       [1, 0.235, 0.45, -0.7, 0.24, false, 364],
-      [0, 0.785, 0.55, 0.5, 0.18, true, 156],
+      [0, 0.785, 0.55, 0.5, 0.1, true, 156],
     ];
     const hull: Area = [0.02, 0.664, 0.41, 0.696];
     return [
@@ -765,19 +632,19 @@ const EFFECTS: Record<WeatherPlace, (sky: Sky) => Effect[]> = {
           const waterline = v1 * sky.height - 2 + Math.sin(sky.time * 1.1) * 3;
           const depth = source * 0.85;
           const wobble = 4.5 * air.life + 0.5;
-          for (let y = 0; y < depth; y += 2) {
+          for (let y = 0; y < depth; y += REFLECTION_ROW) {
             const f = y / depth;
-            ctx.globalAlpha = 0.24 * (1 - f);
+            ctx.globalAlpha = 0.14 * (1 - f);
             ctx.drawImage(
               sky.image,
               x0 * sky.ratio,
-              (v1 * sky.height - f * source - 2) * sky.ratio,
+              (v1 * sky.height - f * source - REFLECTION_ROW) * sky.ratio,
               width * sky.ratio,
-              2 * sky.ratio,
+              REFLECTION_ROW * sky.ratio,
               x0 + Math.sin((waterline + y) * 0.35 + sky.time * 3) * wobble * (0.4 + f),
               waterline + y,
               width,
-              2.6
+              REFLECTION_ROW * 1.3
             );
           }
           ctx.globalAlpha = 1;
@@ -809,8 +676,6 @@ const EFFECTS: Record<WeatherPlace, (sky: Sky) => Effect[]> = {
     const layer = canvasOf(1, 1);
     let pattern: CanvasPattern | null = null;
     let risen = 0;
-    const puffs: { t: number; speed: number; phase: number }[] = [];
-    let owed = 0;
     const catkins: { x: number; y: number; size: number; phase: number }[] = [];
     return [
       {
@@ -853,33 +718,6 @@ const EFFECTS: Record<WeatherPlace, (sky: Sky) => Effect[]> = {
           g.drawImage(shape, 0, 0, W, H);
           ctx.globalAlpha = 0.68 * (0.3 + 0.7 * air.life);
           ctx.drawImage(layer, HK_SMOKE_BOX[0] - 1, HK_SMOKE_BOX[1] - 1, w, h);
-          // A few faint puffs carry on past where the brush stopped.
-          owed += seconds * 2.2 * air.life;
-          for (; owed >= 1; owed--)
-            puffs.push({ t: 0.86, speed: random(0.05, 0.08), phase: random(0, 6) });
-          for (let i = puffs.length - 1; i >= 0; i--) {
-            const wisp = puffs[i];
-            wisp.t += wisp.speed * seconds * (0.3 + 0.7 * air.life);
-            if (wisp.t >= 1.35) {
-              puffs.splice(i, 1);
-              continue;
-            }
-            const [x, y, nx, ny] = along(HK_SMOKE, wisp.t);
-            const off = Math.sin(wisp.t * 14 - sky.time + wisp.phase) * 8;
-            const size = 11 + (wisp.t - 0.86) * 56;
-            ctx.globalAlpha =
-              0.07 *
-              sky.tone.smoke.alpha *
-              Math.min(1, (wisp.t - 0.86) * 12) *
-              Math.max(0, (1.35 - wisp.t) / 0.49);
-            ctx.drawImage(
-              puff(sky.tone.smoke.puff),
-              x + nx * off - size,
-              y + ny * off - size,
-              size * 2,
-              size * 2
-            );
-          }
           ctx.globalAlpha = 1;
         },
       },
@@ -942,17 +780,9 @@ const EFFECTS: Record<WeatherPlace, (sky: Sky) => Effect[]> = {
       },
     ];
   },
-  // The scholar at the waterfall: falling water, the stream, leaves falling, mist on the river and fog in the gorge.
+  // The scholar at the waterfall: falling water, leaves falling, mist on the river and fog in the gorge.
   MO: (sky) => {
     const falls = waterfall(sky, MO_FALLS);
-    const stream = flowMarks(sky, {
-      start: [0.88 * sky.width, 0.835 * sky.height],
-      end: [0.62 * sky.width, 0.885 * sky.height],
-      count: 12,
-      length: 16,
-      alpha: 0.22,
-      jitter: [21, 19],
-    });
     const trees: Area[] = [
       [0.13, 0.03, 0.46, 0.27],
       [0.55, 0.3, 0.98, 0.43],
@@ -971,7 +801,6 @@ const EFFECTS: Record<WeatherPlace, (sky: Sky) => Effect[]> = {
     });
     return [
       { draw: falls },
-      { draw: stream },
       {
         draw: (ctx, air, seconds) => {
           leaves(ctx, air, seconds, air.life < 0.5 ? 0 : 0.37);
@@ -1018,24 +847,6 @@ const EFFECTS: Record<WeatherPlace, (sky: Sky) => Effect[]> = {
   // Chen Chun's scroll: cloud belts the camera climbs through, the waterfall, smoke, and the river under the bridge.
   path: (sky) => {
     const falls = waterfall(sky, PATH_FALLS);
-    const lanes = [
-      flowMarks(sky, {
-        start: [14, 3449],
-        end: [445, 3463],
-        count: 14,
-        length: 25,
-        alpha: 0.4,
-        jitter: [20, 6],
-      }),
-      flowMarks(sky, {
-        start: [43, 3474],
-        end: [430, 3492],
-        count: 12,
-        length: 20,
-        alpha: 0.32,
-        jitter: [20, 6],
-      }),
-    ];
     return [
       {
         mist: true,
@@ -1083,7 +894,7 @@ const EFFECTS: Record<WeatherPlace, (sky: Sky) => Effect[]> = {
         },
       },
       {
-        draw: (ctx, air, seconds) => {
+        draw: (ctx, air) => {
           band(ctx, sky, [-0.02, 0.952, 0.36, 0.976], {
             drift: [16, 0],
             grain: 400,
@@ -1091,7 +902,6 @@ const EFFECTS: Record<WeatherPlace, (sky: Sky) => Effect[]> = {
             edge: 0.35,
             side: 0.2,
           });
-          for (const lane of lanes) lane(ctx, air, seconds);
         },
       },
     ];
@@ -1120,16 +930,16 @@ const gustOf = (wind: number) => 0.4 + 3 * clamp(wind);
 
 /**
  * The weather over `place`'s painting, cut from `image`, a layer `width`×`height` units, in
- * `tone`'s colours. With `gl`, the last mist each of `draw`, `veil` and `gust` lays may still
- * wait in it: flush `gl` onto the canvas before drawing anything else there. `windOf` says how
- * hard the wind blows there now, 0 to 1.
+ * `tone`'s colours. `draw` queues its mist on `layers.under` and draws the rest on its canvas;
+ * `veil` and `gust` queue theirs on `layers.over`. Flush the layers once all is queued.
+ * `windOf` says how hard the wind blows there now, 0 to 1.
  */
 export function makeWeather(
   place: WeatherPlace,
   image: CanvasImageSource & { width: number; height: number },
   { width, height }: { width: number; height: number },
-  tone: Tone = DAY_TONE,
-  gl: InkGL | null = null,
+  tone: Tone,
+  layers: InkLayers,
   {
     liveSmoke = false,
     windOf = () => PAINTED_WIND,
@@ -1141,26 +951,14 @@ export function makeWeather(
     width,
     height,
     view: { left: 0, top: 0, right: width, bottom: height },
-    scratch: canvasOf(1, 1),
-    patterns: new Map(),
     time: 0,
     gust: gustOf(windOf()),
     blown: 0,
     tone,
-    gl,
-    batching: false,
+    gl: layers.under,
   };
   let lastTime = 0;
   const effects = EFFECTS[place](sky).filter((effect) => !(liveSmoke && effect.smoke));
-  /** Runs `paint`, which draws only mist, letting its mist wait to be drawn in one go. */
-  const mistOnly = (paint: () => void) => {
-    sky.batching = true;
-    try {
-      paint();
-    } finally {
-      sky.batching = false;
-    }
-  };
   const look = (ctx: Context) => {
     const m = ctx.getTransform();
     sky.view = {
@@ -1175,6 +973,7 @@ export function makeWeather(
     tone,
     draw: (ctx, air, seconds, still) => {
       look(ctx);
+      sky.gl = layers.under;
       sky.time = still ? 0 : air.time;
       // The wind changes every half hour or so; the mist and leaves take a few seconds to follow.
       sky.gust += (gustOf(windOf()) - sky.gust) * Math.min(1, seconds * 0.4);
@@ -1183,12 +982,7 @@ export function makeWeather(
       for (const effect of effects) {
         if (still && !effect.mist) continue;
         ctx.save();
-        if (effect.mist) mistOnly(() => effect.draw(ctx, air, still ? 0 : seconds));
-        else {
-          // What this effect draws in 2D goes over the mist before it.
-          gl?.flush(ctx);
-          effect.draw(ctx, air, still ? 0 : seconds);
-        }
+        effect.draw(ctx, air, still ? 0 : seconds);
         ctx.restore();
       }
     },
@@ -1196,54 +990,42 @@ export function makeWeather(
       const k = stopped(air);
       if (k <= 0.01) return;
       look(ctx);
+      sky.gl = layers.over;
       const { left, top, right, bottom } = sky.view;
       const [w, h] = [right - left, bottom - top];
-      mistOnly(() => {
-        fog(ctx, sky, [left - 50, top - 50, w + 100, h + 100], {
-          drift: [13, 0],
-          grain: 1070,
-          alpha: 0.55 * k,
-          edge: 0.05,
-          side: 0.02,
-          paper: true,
-        });
-        fog(ctx, sky, [left - 50, top + h * 0.3, w + 100, h * 0.75], {
-          drift: [-21, 0],
-          grain: 600,
-          alpha: 0.5 * k,
-          edge: 0.2,
-          side: 0.02,
-          paper: true,
-        });
+      fog(ctx, sky, [left - 50, top - 50, w + 100, h + 100], {
+        drift: [13, 0],
+        grain: 1070,
+        alpha: 0.75 * k,
+        edge: 0.05,
+        side: 0.02,
+        paper: true,
       });
     },
     gust: (ctx, progress, direction) => {
       look(ctx);
+      sky.gl = layers.over;
       const { left, top, right, bottom } = sky.view;
       const [w, h] = [right - left, bottom - top];
       const bank = w * 3;
       // Broad, blurred layers a little behind each other, so it comes on as an even, soft fog with no clouds in it.
-      mistOnly(() => {
-        for (const [lag, grain, alpha] of [
-          [0, 2600, 1],
-          [0.06, 1800, 1],
-          [0.12, 3400, 0.9],
-          [0.18, 2200, 0.9],
-        ]) {
-          const p = clamp((progress - lag) / (1 - lag));
-          if (p <= 0 || p >= 1) continue;
-          const along = (w + bank) * (p * p * (3 - 2 * p));
-          const x = direction > 0 ? left - bank + along : right - along;
-          fog(ctx, sky, [x, top - h * 0.2, bank, h * 1.4], {
-            drift: [direction * 40, -5],
-            grain,
-            alpha: alpha * Math.min(1, 1.6 * Math.sin(Math.PI * p)),
-            edge: 0.2,
-            side: 0.4,
-            softness: 24,
-          });
-        }
-      });
+      for (const [lag, grain, alpha] of [
+        [0, 2600, 1],
+        [0.12, 3400, 0.9],
+      ]) {
+        const p = clamp((progress - lag) / (1 - lag));
+        if (p <= 0 || p >= 1) continue;
+        const along = (w + bank) * (p * p * (3 - 2 * p));
+        const x = direction > 0 ? left - bank + along : right - along;
+        fog(ctx, sky, [x, top - h * 0.2, bank, h * 1.4], {
+          drift: [direction * 40, -5],
+          grain,
+          alpha: alpha * Math.min(1, 1.6 * Math.sin(Math.PI * p)),
+          edge: 0.2,
+          side: 0.4,
+          softness: 24,
+        });
+      }
     },
   };
 }
