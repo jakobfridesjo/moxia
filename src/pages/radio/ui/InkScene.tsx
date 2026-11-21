@@ -77,7 +77,7 @@ const BLOOM_MS = 2200;
 const GUST_MS = 2800;
 /** How far subtitles keep from the screen's edge where there are no keys to measure it by, in CSS pixels. */
 const CAPTION_MARGIN = 16;
-/** The room the usual inscription takes from the screen's right edge, in CSS pixels: its margin, the name's column under its seal and the frequency beside it. Subtitles keep clear of that much whatever the station, so their box never changes width. */
+/** The room the usual inscription takes from the screen's right edge, in CSS pixels: its margin, the name's first column under its seal, and a little more. Subtitles keep clear of that much whatever the station, so their box never changes width. */
 const INSCRIPTION_ROOM = 96;
 /** How far down the screen subtitles may be written, as a fraction of its height: the same on every painting. */
 const CAPTION_END = 0.43;

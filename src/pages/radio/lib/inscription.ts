@@ -1,43 +1,16 @@
-const NUMERALS = "〇一二三四五六七八九";
 const DAY_TENS = ["初", "十", "廿", "三"];
 const DAY_ONES = "十一二三四五六七八九";
 const STATION_TIME_ZONE = "Asia/Shanghai";
 
-/** The title's largest and smallest size, and its largest once it runs to a second column, in rem; it may run down two columns this tall. */
-const TITLE_LARGEST_REM = 1.9;
-const TITLE_SMALLEST_REM = 1.2;
-const TITLE_TWO_COLUMNS_REM = 1.5;
+/** The name's size, and how tall its columns run before it wraps into the next. */
+export const TITLE_REM = 1.9;
 export const TITLE_COLUMN_SVH = 55;
-/** A Latin phrase lies on its side, set this size down, and each letter takes about this much of a character's height. */
+/** A Latin phrase lies on its side, set this size down. */
 export const SIDEWAYS_SIZE_EM = 0.85;
-const SIDEWAYS_EM = 0.6 * SIDEWAYS_SIZE_EM;
 /** Room kept above and below a sideways phrase, in a character's height, so it never touches the characters. */
 export const SIDEWAYS_ROOM_EM = 0.25;
-
-export type Band = "FM" | "AM";
-
-/** A station name with any trailing frequency (`FM100.7`) split off. */
-export function splitFrequency(name: string): {
-  title: string;
-  band: Band | null;
-  frequency: string | null;
-} {
-  const match = /\s*\b(FM|AM)\s*(\d+(?:\.\d+)?)\s*$/i.exec(name);
-  if (!match || match.index === 0) return { title: name, band: null, frequency: null };
-  return {
-    title: name.slice(0, match.index).trim(),
-    band: match[1].toUpperCase() as Band,
-    frequency: match[2],
-  };
-}
-
-/** `100.7` as an inscriber writes it: 一〇〇點七. */
-export function chineseNumerals(number: string, point: string) {
-  return number
-    .split("")
-    .map((digit) => (digit === "." ? point : NUMERALS[Number(digit)]))
-    .join("");
-}
+/** How far sideways letters and digits move back to the column's middle, in their own size: the font centres them with room for descenders most names lack. */
+export const SIDEWAYS_SHIFT_EM = 0.06;
 
 /** A lunar month's day by its traditional name: 初五, 十二, 廿三. */
 function lunarDay(day: number) {
@@ -80,6 +53,7 @@ export function timeOfDay(hour: number): TimeOfDay {
  * How a run of a vertical name is set, as in vertical Chinese typesetting: characters as they are, with a
  * short acronym or a longer number among them in full-width letters standing one under another; a number
  * of one or two digits across one character's square (縱中橫); and a Latin word or phrase on its side.
+ * Brackets and other marks are left out.
  */
 export type InscribedSet = "characters" | "across" | "sideways";
 
@@ -98,10 +72,13 @@ function fullWidth(text: string) {
   );
 }
 
-/** What lies between Latin runs: spaces dropped, and ASCII brackets and marks in the forms that turn with a vertical line. */
+/** What lies between Latin runs: spaces dropped, and ASCII marks in the width of a character. */
 function standing(text: string) {
   return fullWidth(text.replace(/\s+/g, ""));
 }
+
+/** Brackets and other marks, left out of the inscription. */
+const MARKS = /[()[\]{}<>（）［］｛｝〔〕【】《》〈〉「」『』|_~*#@]/g;
 
 /** A name split into runs, each with how it is set in a vertical column. */
 export function inscribedRuns(text: string): { text: string; set: InscribedSet }[] {
@@ -112,9 +89,10 @@ export function inscribedRuns(text: string): { text: string; set: InscribedSet }
     if (last && last.set === set && set !== "across") last.text += part;
     else runs.push({ text: part, set });
   };
+  const name = text.replace(MARKS, " ");
   let at = 0;
-  for (const match of text.matchAll(LATIN_RUN)) {
-    push(standing(text.slice(at, match.index)), "characters");
+  for (const match of name.matchAll(LATIN_RUN)) {
+    push(standing(name.slice(at, match.index)), "characters");
     const latin = match[0];
     if (/\s/.test(latin)) push(latin, "sideways");
     else
@@ -124,34 +102,6 @@ export function inscribedRuns(text: string): { text: string; set: InscribedSet }
       }
     at = match.index + latin.length;
   }
-  push(standing(text.slice(at)), "characters");
+  push(standing(name.slice(at)), "characters");
   return runs;
-}
-
-/** How many characters tall `text` stands in a vertical line. */
-function columnLength(text: string) {
-  const height: Record<InscribedSet, number> = {
-    characters: 1,
-    across: 0,
-    sideways: SIDEWAYS_EM,
-  };
-  return inscribedRuns(text).reduce(
-    (length, run) =>
-      length +
-      (run.set === "across" ? 1 : run.text.length * height[run.set]) +
-      (run.set === "sideways" ? 2 * SIDEWAYS_ROOM_EM : 0),
-    0
-  );
-}
-
-/**
- * The title shrinks to stay in one column, down to the size it takes in two; past that it runs on
- * into a second column, and only a name too long for two shrinks further.
- */
-export function titleSize(text: string) {
-  const length = Math.max(columnLength(text), 1).toFixed(2);
-  const oneColumn = `${TITLE_COLUMN_SVH}svh / ${length}`;
-  const twoColumns = `${2 * TITLE_COLUMN_SVH}svh / ${length}`;
-  const largest = `min(${TITLE_LARGEST_REM}rem, max(${TITLE_TWO_COLUMNS_REM}rem, ${oneColumn}))`;
-  return `clamp(${TITLE_SMALLEST_REM}rem, calc(${twoColumns}), ${largest})`;
 }

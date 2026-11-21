@@ -59,14 +59,10 @@ export const en = {
       /** The seal leading the station name: one character for its region. */
       regions: { CN: "中", TW: "臺", HK: "港", MO: "澳" },
       simplified: {
-        bands: { FM: "调频", AM: "调幅" },
-        point: "点",
         recorded: "录",
         times: { dawn: "晨", day: "午", dusk: "暮", night: "夜" },
       },
       traditional: {
-        bands: { FM: "調頻", AM: "調幅" },
-        point: "點",
         recorded: "錄",
         times: { dawn: "晨", day: "午", dusk: "暮", night: "夜" },
       },
